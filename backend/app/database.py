@@ -5,15 +5,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 데이터베이스 URL
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
+# PostgreSQL 연결 문자열 형식: postgresql://user:password@host:port/dbname
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://admin:admin123@localhost:5432/applicants_db")
 
 # 엔진 생성
+# PostgreSQL 사용 시 echo=True는 개발 환경에서만 권장 (SQL 쿼리 로깅)
 engine = create_engine(DATABASE_URL, echo=True)
-
-
-def create_db_and_tables():
-    """데이터베이스 및 테이블 생성"""
-    SQLModel.metadata.create_all(engine)
 
 
 def get_session():

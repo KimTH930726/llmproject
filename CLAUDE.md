@@ -4,125 +4,189 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-채용 지원자 자기소개서 분석 시스템 - LLM을 활용하여 지원자의 자기소개서를 요약하고 키워드를 추출하는 API 서비스
+채용 지원자 자기소개서 분석 시스템 - PostgreSQL에 저장된 지원자 자기소개서를 LLM으로 요약하고 키워드를 추출하는 분석 전용 API 서비스
 
 ### Core Features
-1. **요약 API** - 지원자 자기소개서를 조회하여 LLM으로 요약 생성
-2. **키워드 생성 API** - 자기소개서에서 주요 키워드 추출
+1. **요약 API** - PostgreSQL에서 지원자 ID로 자기소개서를 조회하여 LLM으로 요약 생성
+2. **키워드 추출 API** - 지원자 ID로 자기소개서에서 주요 키워드 추출
+
+**중요**: 이 시스템은 **분석 전용**입니다. 지원자 데이터는 PostgreSQL에 이미 존재하며, 조회/생성/수정/삭제 기능은 제공하지 않습니다.
 
 ## Tech Stack
 
 ### Backend
-- **FastAPI** (Python) - Web framework
-- **SQLModel** - ORM for database operations
-- **SQLite** - Database (지원자 정보 저장)
-- **Ollama** - LLM integration (자기소개서 분석용)
+- **FastAPI** (Python) - Web framework with async support
+- **SQLModel** - ORM combining SQLAlchemy + Pydantic
+- **PostgreSQL 16** - Database (지원자 정보 저장, 읽기 전용)
+- **Ollama** - LLM integration using llama3.2:1b model
+- **httpx** - Async HTTP client for Ollama API calls
+- **psycopg2-binary** - PostgreSQL driver
 
 ### Frontend
-- **React** + **TypeScript**
-- **Vite** - Build tool
-- **Tailwind CSS** - Styling
+- **React 19** + **TypeScript**
+- **Vite 7** - Build tool and dev server
+- **Tailwind CSS 4** - Utility-first styling
 
 ## Architecture
 
-### Data Flow
-1. Database에서 지원자의 자기소개서(cover letter/personal statement) 컬럼 조회
-2. 조회된 텍스트 + 프롬프트를 Ollama LLM에 전송
-3. LLM 응답 처리 및 클라이언트에 반환
+### Database Schema
+PostgreSQL `applicants` 테이블:
+- `id` (SERIAL PRIMARY KEY) - 지원자 ID
+- `content` (TEXT NOT NULL) - 자기소개서 내용
 
-### Backend Structure
-- FastAPI REST API endpoints
-  - 요약 API endpoint
-  - 키워드 생성 API endpoint
-- SQLModel로 지원자 데이터 모델 정의
-- Ollama 연동 로직
-- SQLite database에 지원자 자기소개서 저장
+**Docker 환경**: [init.sql](init.sql)에서 Docker Compose 시작 시 자동 생성
+**로컬 환경**: 수동으로 `init.sql` 실행 필요 (아래 참조)
 
-### Frontend Structure
-- React + TypeScript SPA
-- Vite로 빌드
-- Tailwind CSS로 스타일링
-- Backend API 호출하여 요약/키워드 결과 표시
+### Request Flow
+**Analysis by ID**: Client → FastAPI → PostgreSQL (SELECT applicant by ID) → Ollama Service → LLM → Response
+
+### Key Architectural Patterns
+
+#### Analysis-Only API
+- PostgreSQL 데이터베이스는 **읽기 전용**으로 사용됨
+- 지원자 조회 API 없음 (ID를 이미 알고 있다고 가정)
+- 분석 API만 제공 (요약, 키워드 추출)
+- FastAPI는 테이블을 생성하지 않음 (init.sql이 담당)
+
+#### Dependency Injection
+- SQLModel `Session` is injected via FastAPI's `Depends(get_session)`
+- Sessions are context-managed in [database.py](backend/app/database.py:16-19) with `yield`
+- Ensures proper connection lifecycle management
+
+#### Singleton Service Pattern
+- `OllamaService` is instantiated as singleton: `ollama_service` in [ollama_service.py](backend/app/services/ollama_service.py:57)
+- All API endpoints import and use the same instance
+- Configuration loaded once from environment variables
+
+#### API Router Organization
+- [analysis.py](backend/app/api/analysis.py) - LLM-powered analysis endpoints (요약, 키워드 추출)
+- Router registered in [main.py](backend/app/main.py:23) using `app.include_router()`
+
+#### Model Structure
+- **Table Model**: `Applicant` (SQLModel with `table=True`, 2 columns: id, content)
+- **Response Models**: `SummaryResponse`, `KeywordsResponse` (분석 결과 응답용)
+- No CRUD models (분석 전용)
 
 ## Development Commands
 
-### Docker를 사용한 개발 (권장)
+### Docker Development (권장)
 
 ```bash
-# 전체 서비스 시작
+# Start all services (postgres, backend, frontend, ollama)
 docker-compose up -d
 
-# Ollama 모델 다운로드
-docker exec ollama ollama pull llama2
+# PostgreSQL은 init.sql로 자동 초기화됨 (applicants 테이블 + 샘플 데이터)
 
-# 로그 확인
+# Download Ollama model (required on first run)
+docker exec ollama ollama pull llama3.2:1b
+
+# View logs
 docker-compose logs -f
+docker-compose logs -f backend  # specific service
+docker-compose logs -f postgres  # database logs
 
-# 서비스 중지
+# Restart after code changes
+docker-compose restart backend
+
+# Stop all services
 docker-compose down
+
+# Stop and remove volumes (WARNING: deletes database)
+docker-compose down -v
 ```
 
-### Prerequisites (Docker 없이 로컬 개발 시)
-1. Python 3.10+ 설치
-2. Node.js 18+ 설치
-3. Ollama 설치 및 실행 (`ollama serve`)
-4. Ollama 모델 다운로드 (`ollama pull llama2`)
+**Service URLs:**
+- Frontend: http://localhost
+- Backend API: http://localhost:8000
+- API Docs: http://localhost:8000/docs
+- PostgreSQL: localhost:5432
+- Ollama: http://localhost:11434
 
-### Backend Setup
+**Default PostgreSQL Credentials:**
+- Database: `applicants_db`
+- User: `admin`
+- Password: `admin123`
+
+### Local Development (without Docker)
+
+**Prerequisites:**
+- Python 3.10+
+- Node.js 18+
+- PostgreSQL 16+ installed and running
+- Ollama installed and running
+
+**PostgreSQL Setup:**
+```bash
+# 1. PostgreSQL 서버가 실행 중인지 확인
+pg_isready
+
+# 2. 데이터베이스 생성
+createdb -U postgres applicants_db
+
+# 3. init.sql 실행하여 테이블 생성 및 샘플 데이터 삽입
+psql -U postgres -d applicants_db -f init.sql
+
+# 또는 직접 SQL 실행:
+psql -U postgres -d applicants_db
+# psql 내에서:
+# \i init.sql
+# \dt  -- 테이블 확인
+# SELECT * FROM applicants;  -- 데이터 확인
+```
+
+**Backend:**
 ```bash
 cd backend
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env  # .env 파일을 생성하고 설정 수정
-```
+cp .env.example .env  # Configure DATABASE_URL for local PostgreSQL
 
-### Backend Commands
-```bash
-cd backend
-source venv/bin/activate  # venv 활성화 (필요시)
-
-# 개발 서버 실행
+# Run dev server with hot reload
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-
-# API 문서 확인
-# 서버 실행 후 http://localhost:8000/docs 접속
 ```
 
-### Frontend Setup
+**Frontend:**
 ```bash
 cd frontend
 npm install
-```
 
-### Frontend Commands
-```bash
-cd frontend
-
-# 개발 서버 실행
+# Dev server (hot module replacement enabled)
 npm run dev
 
-# 프로덕션 빌드
+# Production build
 npm run build
 
-# 빌드 결과 미리보기
+# Lint
+npm run lint
+
+# Preview production build
 npm run preview
+```
+
+**Ollama:**
+```bash
+# Start Ollama server
+ollama serve
+
+# Download model (in another terminal)
+ollama pull llama3.2:1b
 ```
 
 ## API Endpoints
 
-### 지원자 관리
-- `POST /api/applicants/` - 지원자 생성
-- `GET /api/applicants/` - 지원자 목록 조회
-- `GET /api/applicants/{id}` - 특정 지원자 조회
-- `PATCH /api/applicants/{id}` - 지원자 정보 수정
-- `DELETE /api/applicants/{id}` - 지원자 삭제
+### 자기소개서 분석 (분석 전용)
+- `POST /api/analysis/summarize/{applicant_id}` - 지원자 ID로 요약
+  - Path Parameter: `applicant_id` (int)
+  - Response: `{ "applicant_id": int, "summary": string }`
 
-### 자기소개서 분석
-- `POST /api/analysis/summarize` - 자기소개서 요약 (텍스트 직접 전달)
-- `POST /api/analysis/keywords` - 키워드 추출 (텍스트 직접 전달)
-- `POST /api/analysis/summarize/{applicant_id}` - 지원자 ID로 요약 (DB 조회)
-- `POST /api/analysis/keywords/{applicant_id}` - 지원자 ID로 키워드 추출 (DB 조회)
+- `POST /api/analysis/keywords/{applicant_id}` - 지원자 ID로 키워드 추출
+  - Path Parameter: `applicant_id` (int)
+  - Response: `{ "applicant_id": int, "keywords": string[] }`
+
+**Note**: 지원자 조회 API는 없습니다. 분석 API 호출 시 지원자 ID를 이미 알고 있어야 합니다.
+
+API 문서: http://localhost:8000/docs
 
 ## Project Structure
 
@@ -131,13 +195,12 @@ npm run preview
 ├── backend/              # FastAPI 백엔드
 │   ├── app/
 │   │   ├── api/              # API 라우터
-│   │   │   ├── analysis.py   # 분석 API (요약, 키워드)
-│   │   │   └── applicants.py # 지원자 CRUD API
+│   │   │   └── analysis.py   # 분석 API (요약, 키워드)
 │   │   ├── models/           # SQLModel 데이터 모델
-│   │   │   └── applicant.py
+│   │   │   └── applicant.py  # Applicant (테이블 모델만)
 │   │   ├── services/         # 비즈니스 로직
 │   │   │   └── ollama_service.py  # Ollama 연동
-│   │   ├── database.py       # DB 연결 및 세션 관리
+│   │   ├── database.py       # PostgreSQL 연결 및 세션 관리
 │   │   └── main.py           # FastAPI 앱 엔트리포인트
 │   ├── Dockerfile
 │   ├── requirements.txt
@@ -163,7 +226,8 @@ npm run preview
 │   ├── import-dependencies.sh     # 의존성 패키지 가져오기
 │   └── full-export.sh             # 전체 프로젝트 내보내기
 │
-├── docker-compose.yml  # Docker Compose 설정
+├── init.sql           # PostgreSQL 초기화 스크립트 (테이블 생성 + 샘플 데이터)
+├── docker-compose.yml # Docker Compose 설정 (postgres, ollama, backend, frontend)
 ├── CLAUDE.md          # Claude Code 개발 가이드
 └── README.md          # 프로젝트 문서
 ```
@@ -179,7 +243,7 @@ npm run preview
 
 이 스크립트는 다음을 수행합니다:
 1. 소스 코드 복사
-2. Docker 이미지 내보내기 (backend, frontend, ollama, base images)
+2. Docker 이미지 내보내기 (backend, frontend, ollama, postgres, base images)
 3. Ollama 모델 내보내기
 4. Python/Node.js 의존성 패키지 내보내기
 5. 설치 가이드 생성
@@ -211,17 +275,50 @@ npm run preview
 3. `cd export-package_*/source`
 4. `INSTALL.md` 파일 참고하여 설치
 
-## Important Notes
+## Important Development Notes
 
-### 환경 변수
-- 백엔드의 `.env` 파일에서 Ollama URL, 데이터베이스 경로 설정 가능
-- Docker Compose 사용 시 `docker-compose.yml`에서 환경 변수 관리
+### Environment Configuration
+- Backend: Configure via [.env](backend/.env.example) file
+  - `OLLAMA_BASE_URL`: Ollama API endpoint (default: http://localhost:11434)
+  - `OLLAMA_MODEL`: Model name (default: llama3.2:1b)
+  - `DATABASE_URL`: PostgreSQL connection string
+    - Docker: `postgresql://admin:admin123@postgres:5432/applicants_db`
+    - Local: `postgresql://admin:admin123@localhost:5432/applicants_db`
+- Docker: Environment variables set in [docker-compose.yml](docker-compose.yml)
+- CORS: Currently allows http://localhost:5173 (Vite dev server) in [main.py](backend/app/main.py)
 
-### 데이터 영속성
-- Docker 볼륨을 사용하여 데이터베이스와 Ollama 모델 데이터 유지
-- `docker-compose down -v` 실행 시 모든 데이터 삭제됨 (주의!)
+### Database Management
+- **Analysis-Only**: 이 애플리케이션은 데이터를 읽기만 하고 조회 API도 없음
+- **Docker**: [init.sql](init.sql)이 PostgreSQL 컨테이너 시작 시 자동 실행됨
+- **Local**: `psql -d applicants_db -f init.sql` 명령으로 수동 실행 필요
+- Sample data included in init.sql for testing
+- FastAPI does NOT auto-create tables (no lifespan events)
+- **Migration strategy**: Manual SQL scripts (no Alembic configured)
+- Reset database: `docker-compose down -v && docker-compose up -d`
 
-### API 개발
-- FastAPI의 자동 문서화 기능 활용: `/docs` (Swagger UI), `/redoc` (ReDoc)
-- 새로운 API 추가 시 `backend/app/api/` 디렉토리에 라우터 파일 생성
-- `main.py`에서 `app.include_router()` 호출하여 등록
+### PostgreSQL Connection
+- Connection pooling handled by SQLModel/SQLAlchemy
+- Connection string format: `postgresql://user:password@host:port/dbname`
+- psycopg2-binary required for PostgreSQL driver
+- **로컬 개발 시**: PostgreSQL 서버가 실행 중이어야 하며, init.sql을 수동으로 실행해야 함
+
+### LLM Integration
+- Ollama API called via async `httpx.AsyncClient` with 120s timeout in [ollama_service.py](backend/app/services/ollama_service.py:23)
+- Non-streaming mode (`"stream": False`) for simplicity
+- Prompts are hardcoded in Korean in service methods
+- Model must be pulled before first use: `ollama pull llama3.2:1b`
+
+### Adding New Features
+
+**New Analysis Endpoint:**
+1. Add method to `OllamaService` class in [ollama_service.py](backend/app/services/ollama_service.py)
+2. Create endpoint in [analysis.py](backend/app/api/analysis.py)
+3. Use dependency injection: `session: Session = Depends(get_session)`
+4. Endpoint must be `async def` for LLM calls
+
+**Modify Database Schema:**
+1. Edit [init.sql](init.sql) to add/modify columns
+2. Update `Applicant` model in [applicant.py](backend/app/models/applicant.py)
+3. **Docker**: `docker-compose down -v && docker-compose up -d` (자동 재생성)
+4. **Local**: Drop and recreate database, then run `psql -d applicants_db -f init.sql`
+5. **Note**: No migration tool configured - manual SQL changes required

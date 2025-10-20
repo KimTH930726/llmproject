@@ -1,6 +1,28 @@
 version: '3.8'
 
 services:
+  # PostgreSQL 데이터베이스
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin123
+      - POSTGRES_DB=applicants_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d applicants_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # Ollama 서비스 (LLM)
   ollama:
     image: ollama/ollama:latest
@@ -29,12 +51,14 @@ services:
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
       - OLLAMA_MODEL=llama3.2:1b
-      - DATABASE_URL=sqlite:///./app.db
+      - DATABASE_URL=postgresql://admin:admin123@postgres:5432/applicants_db
     volumes:
       - ./backend/app:/app/app
-      - backend_data:/app/data
     depends_on:
-      - ollama
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
     networks:
       - app-network
     restart: unless-stopped
@@ -63,7 +87,7 @@ networks:
     driver: bridge
 
 volumes:
-  ollama_data:
+  postgres_data:
     driver: local
-  backend_data:
+  ollama_data:
     driver: local
