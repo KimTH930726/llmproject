@@ -10,10 +10,14 @@ class Applicant(SQLModel, table=True):
     __tablename__ = "applicants"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    content: str  # 자기소개서 내용
+    reason: Optional[str] = Field(default=None, max_length=4000)  # 지원 동기
+    experience: Optional[str] = Field(default=None, max_length=4000)  # 경력 및 경험
+    skill: Optional[str] = Field(default=None, max_length=4000)  # 기술 스택 및 역량
 
 
 class ApplicantRead(SQLModel):
     """지원자 조회 응답 모델"""
     id: int
-    content: str
+    reason: Optional[str] = None
+    experience: Optional[str] = None
+    skill: Optional[str] = None
