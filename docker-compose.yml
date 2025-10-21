@@ -1,75 +1,19 @@
 version: '3.8'
 
 services:
-  # PostgreSQL 데이터베이스
-  postgres:
-    image: postgres:16-alpine
-    container_name: postgres
-    ports:
-      - "5432:5432"
-    environment:
-      - POSTGRES_USER=admin
-      - POSTGRES_PASSWORD=admin123
-      - POSTGRES_DB=applicants_db
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-    networks:
-      - app-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin -d applicants_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # Ollama 서비스 (LLM)
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    networks:
-      - app-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
   # 백엔드 서비스 (FastAPI)
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile.offline
     container_name: backend
     ports:
       - "8000:8000"
     env_file:
       - ./backend/.env  # .env 파일에서 환경 변수 로드
-    environment:
-      # .env 파일 값을 오버라이드하려면 여기에 추가
-      - OLLAMA_BASE_URL=http://ollama:11434
-      - DATABASE_URL=postgresql://admin:admin123@postgres:5432/applicants_db
-    volumes:
-      - ./backend/app:/app/app  # 소스 코드 마운트 (개발용)
-      - ./backend/.env:/app/.env  # .env 파일 마운트
-    depends_on:
-      postgres:
-        condition: service_healthy
-      ollama:
-        condition: service_started
     networks:
       - app-network
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   # 프론트엔드 서비스 (React + Nginx)
   frontend:
@@ -88,9 +32,3 @@ services:
 networks:
   app-network:
     driver: bridge
-
-volumes:
-  postgres_data:
-    driver: local
-  ollama_data:
-    driver: local
