@@ -1,4 +1,5 @@
-from sqlmodel import SQLModel, Field
+from sqlmodel import SQLModel, Field, Column
+from sqlalchemy import String
 from typing import Optional
 
 
@@ -10,9 +11,9 @@ class Applicant(SQLModel, table=True):
     __tablename__ = "applicant_info"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    reason: Optional[str] = Field(default=None, max_length=4000)  # 지원 동기
-    experience: Optional[str] = Field(default=None, max_length=4000)  # 경력 및 경험
-    skill: Optional[str] = Field(default=None, max_length=4000)  # 기술 스택 및 역량
+    reason: Optional[str] = Field(default=None, sa_column=Column(String(4000)))  # 지원 동기
+    experience: Optional[str] = Field(default=None, sa_column=Column(String(4000)))  # 경력 및 경험
+    skill: Optional[str] = Field(default=None, sa_column=Column(String(4000)))  # 기술 스택 및 역량
 
 
 class ApplicantRead(SQLModel):

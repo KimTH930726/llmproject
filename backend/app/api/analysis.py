@@ -43,6 +43,12 @@ async def summarize_applicant(
     if not applicant:
         raise HTTPException(status_code=404, detail="지원자를 찾을 수 없습니다")
 
+    # 디버깅: 조회된 데이터 로그
+    print(f"[DEBUG] Applicant ID: {applicant.id}")
+    print(f"[DEBUG] Reason length: {len(applicant.reason) if applicant.reason else 0}")
+    print(f"[DEBUG] Experience length: {len(applicant.experience) if applicant.experience else 0}")
+    print(f"[DEBUG] Skill length: {len(applicant.skill) if applicant.skill else 0}")
+
     try:
         summary = await ollama_service.summarize_applicant(
             applicant.reason or "",
