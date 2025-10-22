@@ -253,10 +253,14 @@ docker pull node:20-alpine && docker save -o node-20-alpine.tar node:20-alpine
 docker pull nginx:alpine && docker save -o nginx-alpine.tar nginx:alpine
 
 # 2. Python 패키지 다운로드 (오프라인 설치용, Linux 서버용)
-cd backend
-# Docker로 Linux 환경에서 다운로드 (권장)
-docker run --rm -v $(pwd):/workspace -w /workspace python:3.11-slim \
-  pip download -r requirements.txt -d ../python-packages/
+# 프로젝트 루트에서 실행
+mkdir -p python-packages
+docker run --rm \
+  -v $(pwd)/backend:/workspace/backend \
+  -v $(pwd)/python-packages:/workspace/python-packages \
+  -w /workspace/backend \
+  python:3.11-slim \
+  pip download -r requirements.txt -d /workspace/python-packages/
 
 # 3. 전체 압축
 cd ../..

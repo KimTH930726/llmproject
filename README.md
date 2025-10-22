@@ -56,10 +56,15 @@ docker pull --platform linux/amd64 python:3.11-slim && docker save -o python-3.1
 docker pull --platform linux/amd64 node:20-alpine && docker save -o node-20-alpine.tar node:20-alpine
 docker pull --platform linux/amd64 nginx:alpine && docker save -o nginx-alpine.tar nginx:alpine
 
-# Python 패키지 다운로드 (Linux 서버용, Docker 사용 권장)
-cd backend
-docker run --rm -v $(pwd):/workspace -w /workspace python:3.11-slim \
-  pip download -r requirements.txt -d ../python-packages/
+# Python 패키지 다운로드 (Linux 서버용)
+# 프로젝트 루트에서 실행
+mkdir -p python-packages
+docker run --rm \
+  -v $(pwd)/backend:/workspace/backend \
+  -v $(pwd)/python-packages:/workspace/python-packages \
+  -w /workspace/backend \
+  python:3.11-slim \
+  pip download -r requirements.txt -d /workspace/python-packages/
 
 # 전체 압축
 cd ../..

@@ -38,25 +38,27 @@ docker save -o nginx-alpine.tar nginx:alpine
 #### B. Python 패키지 다운로드 (오프라인 설치용)
 
 ```bash
-# backend 디렉토리에서 실행
-# 중요: Linux 서버용으로 다운로드
-cd backend
-
+# 프로젝트 루트 디렉토리에서 실행
 # Docker 사용하여 Linux 환경에서 패키지 다운로드 (권장)
-docker run --rm -v $(pwd):/workspace -w /workspace python:3.11-slim \
-  pip download -r requirements.txt -d ../python-packages/
 
-# 또는 pip download 직접 사용 (Linux 플랫폼 지정)
-pip download \
-  --platform manylinux2014_x86_64 \
-  --only-binary=:all: \
-  -r requirements.txt \
-  -d ../python-packages/
+# python-packages 디렉토리 생성
+mkdir -p python-packages
+
+# Docker로 Linux 환경에서 다운로드
+docker run --rm \
+  -v $(pwd)/backend:/workspace/backend \
+  -v $(pwd)/python-packages:/workspace/python-packages \
+  -w /workspace/backend \
+  python:3.11-slim \
+  pip download -r requirements.txt -d /workspace/python-packages/
 ```
 
 **결과:** `python-packages/` 디렉토리에 Linux용 `.whl` 파일들 생성됨
 
-**권장 방법:** Docker 명령어 사용 시 실제 Linux 환경에서 다운로드되므로 호환성 문제가 없습니다.
+**설명:**
+- 프로젝트 루트에서 실행
+- `backend/` 와 `python-packages/` 두 디렉토리 모두 마운트
+- 컨테이너 내부의 `/workspace/python-packages/`에 저장 → 호스트의 `python-packages/`에 저장됨
 
 #### C. 서버로 전송할 파일 정리
 
