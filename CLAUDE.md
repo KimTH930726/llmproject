@@ -254,15 +254,9 @@ docker pull nginx:alpine && docker save -o nginx-alpine.tar nginx:alpine
 
 # 2. Python 패키지 다운로드 (오프라인 설치용, Linux 서버용)
 cd backend
-pip download \
-  --platform manylinux2014_x86_64 \
-  --platform manylinux_2_17_x86_64 \
-  --platform linux_x86_64 \
-  --only-binary=:all: \
-  --python-version 311 \
-  -r requirements.txt \
-  -d ../python-packages/
-pip download --no-deps -r requirements.txt -d ../python-packages/
+# Docker로 Linux 환경에서 다운로드 (권장)
+docker run --rm -v $(pwd):/workspace -w /workspace python:3.11-slim \
+  pip download -r requirements.txt -d ../python-packages/
 
 # 3. 전체 압축
 cd ../..
