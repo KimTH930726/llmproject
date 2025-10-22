@@ -39,11 +39,27 @@ docker save -o nginx-alpine.tar nginx:alpine
 
 ```bash
 # backend 디렉토리에서 실행
+# 중요: Linux 서버용으로 다운로드하기 위해 --platform 옵션 필수
 cd backend
-pip download -r requirements.txt -d ../python-packages/
+pip download \
+  --platform manylinux2014_x86_64 \
+  --platform manylinux_2_17_x86_64 \
+  --platform linux_x86_64 \
+  --only-binary=:all: \
+  --python-version 311 \
+  -r requirements.txt \
+  -d ../python-packages/
+
+# 순수 Python 패키지 (플랫폼 무관)도 다운로드
+pip download --no-deps -r requirements.txt -d ../python-packages/
 ```
 
-**결과:** `python-packages/` 디렉토리에 `.whl` 파일들 생성됨
+**결과:** `python-packages/` 디렉토리에 Linux용 `.whl` 파일들 생성됨
+
+**참고:**
+- `--platform manylinux2014_x86_64`: Linux x86_64 아키텍처용 wheel
+- `--only-binary=:all:`: 바이너리 패키지만 다운로드 (소스 빌드 방지)
+- `--python-version 311`: Python 3.11 버전용
 
 #### C. 서버로 전송할 파일 정리
 

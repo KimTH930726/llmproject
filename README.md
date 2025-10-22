@@ -56,9 +56,17 @@ docker pull --platform linux/amd64 python:3.11-slim && docker save -o python-3.1
 docker pull --platform linux/amd64 node:20-alpine && docker save -o node-20-alpine.tar node:20-alpine
 docker pull --platform linux/amd64 nginx:alpine && docker save -o nginx-alpine.tar nginx:alpine
 
-# Python 패키지 다운로드
+# Python 패키지 다운로드 (Linux 서버용)
 cd backend
-pip download -r requirements.txt -d ../python-packages/
+pip download \
+  --platform manylinux2014_x86_64 \
+  --platform manylinux_2_17_x86_64 \
+  --platform linux_x86_64 \
+  --only-binary=:all: \
+  --python-version 311 \
+  -r requirements.txt \
+  -d ../python-packages/
+pip download --no-deps -r requirements.txt -d ../python-packages/
 
 # 전체 압축
 cd ../..
