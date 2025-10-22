@@ -20,16 +20,18 @@
 #### A. 베이스 Docker 이미지 내보내기
 
 ```bash
+# 중요: 서버가 amd64 아키텍처인 경우 --platform 옵션 필수
+
 # 1. Python 베이스 이미지 (Backend용)
-docker pull python:3.11-slim
+docker pull --platform linux/amd64 python:3.11-slim
 docker save -o python-3.11-slim.tar python:3.11-slim
 
 # 2. Node.js 베이스 이미지 (Frontend 빌드용)
-docker pull node:20-alpine
+docker pull --platform linux/amd64 node:20-alpine
 docker save -o node-20-alpine.tar node:20-alpine
 
 # 3. Nginx 베이스 이미지 (Frontend 서빙용)
-docker pull nginx:alpine
+docker pull --platform linux/amd64 nginx:alpine
 docker save -o nginx-alpine.tar nginx:alpine
 ```
 

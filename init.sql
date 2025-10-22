@@ -1,7 +1,7 @@
 -- 지원자 테이블 생성 (PostgreSQL 초기화 스크립트)
 -- Docker Compose로 PostgreSQL 컨테이너 시작 시 자동 실행됨
 
-CREATE TABLE IF NOT EXISTS applicants (
+CREATE TABLE IF NOT EXISTS applicant_info (
     id BIGSERIAL PRIMARY KEY,
     reason VARCHAR(4000),
     experience VARCHAR(4000),
@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS applicants (
 
 -- 샘플 데이터 (테스트용)
 -- ID는 자동 증가(BIGSERIAL)되므로 1부터 3까지 순차적으로 생성됨
-INSERT INTO applicants (reason, experience, skill) VALUES
+INSERT INTO applicant_info (reason, experience, skill) VALUES
 (
     '저는 귀사의 백엔드 개발자 포지션에 지원하게 되었습니다. 귀사가 최신 기술 스택을 활용하여 혁신적인 서비스를 개발하고 있다는 점에 큰 매력을 느꼈습니다. 특히 대용량 트래픽 처리와 확장 가능한 아키텍처 설계에 중점을 두고 있다는 점이 저의 커리어 목표와 잘 부합합니다. 저는 항상 새로운 기술을 배우고 실무에 적용하는 것을 즐기며, 팀과 협업하여 더 나은 서비스를 만들어가는 과정에 보람을 느낍니다.',
     '대학에서 컴퓨터공학을 전공하며 프로그래밍의 기초를 다졌고, 졸업 후 스타트업에서 Python 기반 웹 서비스 개발을 시작했습니다. 현재까지 5년간 백엔드 개발 경력을 쌓아왔으며, FastAPI와 Django를 활용한 RESTful API 설계 및 구현을 주로 담당해왔습니다. AWS 클라우드 인프라 구축과 Docker를 이용한 컨테이너화 작업도 병행하며 DevOps 역량도 키워왔습니다. Redis를 활용한 캐싱 전략과 PostgreSQL 쿼리 튜닝을 통해 응답 속도를 30% 개선한 경험이 있으며, 최근에는 Langchain과 OpenAI API를 활용한 챗봇 서비스를 개발하여 자연어 처리 기술의 실무 적용 가능성을 확인했습니다.',
@@ -28,4 +28,4 @@ INSERT INTO applicants (reason, experience, skill) VALUES
 );
 
 -- 인덱스 생성 (검색 성능 향상)
-CREATE INDEX IF NOT EXISTS idx_applicants_id ON applicants(id);
+CREATE INDEX IF NOT EXISTS idx_applicant_info_id ON applicant_info(id);

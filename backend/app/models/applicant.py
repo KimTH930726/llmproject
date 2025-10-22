@@ -5,9 +5,9 @@ from typing import Optional
 class Applicant(SQLModel, table=True):
     """
     지원자 모델 (읽기 전용)
-    PostgreSQL의 applicants 테이블과 매핑됨
+    PostgreSQL의 applicant_info 테이블과 매핑됨
     """
-    __tablename__ = "applicants"
+    __tablename__ = "applicant_info"
 
     id: Optional[int] = Field(default=None, primary_key=True)
     reason: Optional[str] = Field(default=None, max_length=4000)  # 지원 동기
