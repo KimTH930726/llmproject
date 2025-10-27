@@ -275,6 +275,8 @@ docker-compose up -d --build backend
 - [SETUP-GUIDE.md](SETUP-GUIDE.md) - 폐쇄망 서버 배포 상세 가이드
 - [DEPLOY.md](DEPLOY.md) - 배포 및 문제 해결
 - [CLAUDE.md](CLAUDE.md) - 개발 가이드 (Claude Code용)
+- [RAG_IMPLEMENTATION.md](RAG_IMPLEMENTATION.md) - RAG 기능 구현 보고서 (신규)
+- [EMBEDDING_MODEL_GUIDE.md](EMBEDDING_MODEL_GUIDE.md) - 임베딩 모델 변경 가이드 (신규)
 
 ---
 

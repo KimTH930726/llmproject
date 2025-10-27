@@ -4,14 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-채용 지원자 자기소개서 분석 시스템 - PostgreSQL에 저장된 지원자 자기소개서를 LLM으로 요약하고 키워드를 추출하는 분석 전용 API 서비스
+채용 지원자 자기소개서 분석 및 RAG 기반 문서 검색 시스템 - PostgreSQL 지원자 분석과 Qdrant 벡터 DB를 활용한 문서 검색 통합 서비스
 
 ### Core Features
+
+#### 지원자 분석 (기존)
 1. **요약 API** - PostgreSQL에서 지원자 ID로 지원 동기, 경력, 기술을 조회하여 LLM으로 종합 요약 생성
 2. **키워드 추출 API** - 지원자 정보에서 주요 키워드 추출
 3. **면접 예상 질문 API** - 지원자 정보 기반 면접 예상 질문 10개 자동 생성
 
-**중요**: 이 시스템은 **분석 전용**입니다. 지원자 데이터는 PostgreSQL에 이미 존재하며, CRUD 기능은 제공하지 않습니다.
+#### RAG 기반 채팅 (신규)
+4. **문서 업로드** - PDF, DOCX, TXT, XLSX 파일 업로드 및 Qdrant 벡터 DB 저장
+5. **RAG 검색** - 업로드된 문서에서 관련 정보를 검색하여 LLM으로 답변 생성
+6. **자연어 SQL** - 자연어 질의를 SQL로 변환하여 데이터베이스 조회
+7. **QueryRouter** - 사용자 질의 의도 자동 분류 (문서 검색 vs DB 쿼리 vs 일반 대화)
 
 ## Tech Stack
 
@@ -22,6 +28,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Ollama** - LLM integration using llama3.2:1b model
 - **httpx** - Async HTTP client for Ollama API calls
 - **psycopg2-binary** - PostgreSQL driver
+- **Qdrant** - Vector database for document embeddings (신규)
+- **Sentence Transformers** - Korean text embedding (jhgan/ko-sroberta-multitask) (신규)
+- **PyPDF2, python-docx, openpyxl** - Document text extraction (신규)
 
 ### Frontend
 - **React 19** + **TypeScript**
@@ -41,15 +50,52 @@ PostgreSQL `applicant_info` 테이블:
 **개발/테스트 환경**: [init.sql](init.sql)로 테이블 생성 및 샘플 데이터 삽입 가능
 
 ### Request Flow
+
+#### 1. 지원자 분석 (기존)
 **Analysis by ID**: Client → FastAPI → PostgreSQL (SELECT applicant by ID) → Ollama Service → LLM → Response
+
+#### 2. 문서 업로드 (신규)
+**Upload**: Client → Upload API → TextExtractor → Qdrant Service → Embedding Model → Qdrant Vector DB
+
+#### 3. RAG 채팅 (신규)
+**Chat with RAG**:
+```
+User Query → ChatAPI → QueryRouter (Intent 분류)
+                           ↓
+        ┌──────────────────┼──────────────────┐
+        ↓                  ↓                  ↓
+   RAG Search         SQL Agent         General Chat
+        ↓                  ↓                  ↓
+   Qdrant Search    Natural Language      Ollama LLM
+        ↓              to SQL                 ↓
+   Top-K Docs            ↓               Direct Answer
+        ↓           PostgreSQL
+   Context Build         ↓
+        ↓           Result Interpretation
+   Ollama LLM            ↓
+        ↓           Natural Language
+   Answer + Sources      ↓
+        └──────────────────┴──────────────────┘
+                           ↓
+                    ChatResponse
+```
 
 ### Key Architectural Patterns
 
-#### Analysis-Only API
+#### Analysis-Only API (기존)
 - PostgreSQL 데이터베이스는 **읽기 전용**으로 사용됨
 - 지원자 조회 API 없음 (ID를 이미 알고 있다고 가정)
 - 분석 API만 제공 (요약, 키워드 추출, 면접 예상 질문)
 - FastAPI는 테이블을 생성하지 않음 (폐쇄망 서버에서는 테이블이 이미 존재)
+
+#### RAG Integration Pattern (신규)
+- **QueryRouter**: 사용자 질의의 의도를 분류하여 적절한 서비스로 라우팅
+  - RAG Search: 문서 내용 검색이 필요한 질문
+  - SQL Query: 데이터베이스 조회가 필요한 질문
+  - General: 일반 대화
+- **Vector Search**: Qdrant에서 의미 기반 유사도 검색 (코사인 유사도)
+- **Text Extraction**: 다양한 파일 형식 (PDF, DOCX, TXT, XLSX)에서 텍스트 추출
+- **Embedding Model**: 한국어 지원 Sentence Transformer (jhgan/ko-sroberta-multitask)
 
 #### Dependency Injection
 - SQLModel `Session` is injected via FastAPI's `Depends(get_session)`
@@ -175,7 +221,7 @@ ollama pull llama3.2:1b
 
 ## API Endpoints
 
-### 자기소개서 분석 (분석 전용)
+### 1. 자기소개서 분석 (기존)
 - `POST /api/analysis/summarize/{applicant_id}` - 지원자 ID로 요약
   - Path Parameter: `applicant_id` (int)
   - Response: `{ "applicant_id": int, "summary": string }`
@@ -193,6 +239,30 @@ ollama pull llama3.2:1b
 
 **Note**: 지원자 조회 API는 없습니다. 분석 API 호출 시 지원자 ID를 이미 알고 있어야 합니다.
 
+### 2. 문서 업로드 (신규)
+- `POST /api/upload/` - 문서 파일 업로드 및 벡터 DB 저장
+  - Request: `multipart/form-data` with file
+  - Supported formats: PDF, DOCX, TXT, XLSX
+  - Response: `{ "message": string, "filename": string, "doc_id": string, "text_length": int }`
+  - 파일을 업로드하면 텍스트 추출 후 Qdrant에 임베딩하여 저장
+
+- `GET /api/upload/stats` - 업로드된 문서 통계
+  - Response: `{ "total_documents": int, "collection_name": string }`
+
+### 3. RAG 채팅 (신규)
+- `POST /api/chat/` - 자연어 질의 응답 (QueryRouter 자동 라우팅)
+  - Request: `{ "query": string }`
+  - Response: `{ "answer": string, "intent": string, "sources": [], "sql": string, "results": [] }`
+  - QueryRouter가 자동으로 의도 분류:
+    - `rag_search`: 문서 검색 기반 답변 (sources 포함)
+    - `sql_query`: DB 쿼리 기반 답변 (sql, results 포함)
+    - `general`: 일반 대화
+
+- `POST /api/chat/classify` - 질의 의도 분류 (디버깅용)
+  - Request: `{ "query": string }`
+  - Response: `{ "query": string, "intent_simple": string, "intent_llm": string }`
+  - 규칙 기반과 LLM 기반 분류 결과 비교
+
 API 문서: http://localhost:8000/docs
 
 ## Project Structure
@@ -202,17 +272,26 @@ API 문서: http://localhost:8000/docs
 ├── backend/              # FastAPI 백엔드
 │   ├── app/
 │   │   ├── api/              # API 라우터
-│   │   │   └── analysis.py   # 분석 API (요약, 키워드, 면접질문)
-│   │   ├── models/           # SQLModel 데이터 모델
-│   │   │   └── applicant.py  # Applicant (테이블 모델, 4개 컬럼)
+│   │   │   ├── analysis.py   # 분석 API (요약, 키워드, 면접질문) - 기존
+│   │   │   ├── chat.py       # RAG 채팅 API (QueryRouter 라우팅) - 신규
+│   │   │   └── upload.py     # 문서 업로드 API - 신규
+│   │   ├── models/           # Pydantic/SQLModel 데이터 모델
+│   │   │   ├── applicant.py  # Applicant (테이블 모델, 4개 컬럼) - 기존
+│   │   │   └── chat.py       # 채팅 요청/응답 모델 - 신규
 │   │   ├── services/         # 비즈니스 로직
-│   │   │   └── ollama_service.py  # Ollama 연동 (3개 파라미터)
+│   │   │   ├── ollama_service.py  # Ollama LLM 연동 - 기존
+│   │   │   ├── qdrant_service.py  # Qdrant 벡터 DB 연동 - 신규
+│   │   │   ├── rag_service.py     # RAG 검색 및 답변 생성 - 신규
+│   │   │   ├── query_router.py    # Intent 분류 (RAG/SQL/General) - 신규
+│   │   │   └── sql_agent.py       # 자연어 → SQL 변환 및 실행 - 신규
+│   │   ├── utils/            # 유틸리티
+│   │   │   └── text_extractor.py  # 파일 텍스트 추출 (PDF, DOCX, TXT, XLSX) - 신규
 │   │   ├── database.py       # PostgreSQL 연결 및 세션 관리
 │   │   └── main.py           # FastAPI 앱 엔트리포인트
 │   ├── Dockerfile            # 일반 빌드용 (인터넷 필요)
 │   ├── Dockerfile.offline    # 오프라인 빌드용 (python-packages/ 사용)
-│   ├── requirements.txt
-│   └── .env.example          # 환경 변수 템플릿
+│   ├── requirements.txt      # 의존성 (RAG 패키지 추가됨)
+│   └── .env.example          # 환경 변수 템플릿 (Qdrant 설정 추가)
 │
 ├── frontend/            # React 프론트엔드
 │   ├── src/
@@ -240,9 +319,18 @@ API 문서: http://localhost:8000/docs
 
 ### 배포 전제 조건
 서버에 이미 다음이 실행 중이어야 합니다:
-- PostgreSQL (Docker 컨테이너)
-- Ollama (Docker 컨테이너, llama3.2:1b 모델 포함)
-- `applicants` 테이블 생성 완료
+- **PostgreSQL** (Docker 컨테이너) - 지원자 정보 저장
+- **Ollama** (Docker 컨테이너, llama3.2:1b 모델 포함) - LLM 추론
+- **Qdrant** (Docker 컨테이너) - 벡터 DB (RAG용, 신규)
+- `applicant_info` 테이블 생성 완료
+
+**Qdrant 설치 (서버에서)**:
+```bash
+docker run -d --name qdrant \
+  -p 6333:6333 \
+  -v $(pwd)/qdrant_storage:/qdrant/storage \
+  qdrant/qdrant:latest
+```
 
 ### 인터넷 환경 준비 (사전 작업)
 
@@ -326,6 +414,21 @@ docker-compose up -d --build
 - All service methods accept 3 parameters: `reason`, `experience`, `skill`
 - **폐쇄망 서버**: Ollama 컨테이너가 llama3.2:1b 모델과 함께 이미 실행 중이어야 함
 
+### RAG & Embedding Configuration
+- **Embedding Model**: Sentence Transformers (default: `jhgan/ko-sroberta-multitask`)
+  - Vector dimension: 768
+  - Supports Korean language
+  - Models are auto-downloaded on first run (or can be pre-cached for offline)
+- **Vector Database**: Qdrant
+  - Collection name: configurable via `QDRANT_COLLECTION_NAME` env var
+  - Distance metric: Cosine similarity (default)
+  - Auto-creates collection on startup if not exists
+- **Changing Models**: See [EMBEDDING_MODEL_GUIDE.md](EMBEDDING_MODEL_GUIDE.md) for detailed instructions
+  - How to change embedding model
+  - How to change vector dimension
+  - Performance optimization tips
+  - Troubleshooting guide
+
 ### Adding New Features
 
 **New Analysis Endpoint:**
@@ -337,6 +440,8 @@ docker-compose up -d --build
 **Modify Database Schema:**
 1. Edit [init.sql](init.sql) to add/modify columns (개발/테스트용)
 2. Update `Applicant` model in [applicant.py](backend/app/models/applicant.py)
+   - Use `sa_column=Column(String(length))` for VARCHAR columns to ensure proper SQLAlchemy mapping
+   - Example: `Field(default=None, sa_column=Column(String(4000)))`
 3. Update all `OllamaService` methods if parameter changes are needed
 4. **폐쇄망 서버**: 서버의 PostgreSQL에 직접 SQL 실행 필요
 5. **Note**: No migration tool configured - manual SQL changes required
@@ -346,3 +451,45 @@ docker-compose up -d --build
 2. Python packages from `python-packages/` directory (prepared in internet environment)
 3. Frontend requires internet for npm install during build (또는 사전에 이미지 빌드 후 내보내기)
 4. Build context in docker-compose.yml is project root (`.`) for accessing python-packages/
+
+## Troubleshooting
+
+### 500 Error on Analysis API
+
+**Common Causes:**
+1. **Database Connection Failure**
+   - Symptom: `sqlalchemy.exc.OperationalError: connection refused`
+   - Solution: Check `DATABASE_URL` in `.env` - must use container name or IP, NOT `localhost` when running in Docker
+   - Verify: `docker exec backend ping postgres-container-name`
+
+2. **Ollama Connection Failure**
+   - Symptom: `httpx.ConnectError` or timeout errors
+   - Solution: Check `OLLAMA_BASE_URL` in `.env` - must use container name or IP, NOT `localhost`
+   - Verify: `docker exec backend curl http://ollama:11434/api/version`
+
+3. **Empty Data Retrieved from Database**
+   - Symptom: 200 response but summary/keywords are empty or generic
+   - Debug: Add logging in [analysis.py](backend/app/api/analysis.py) to check data lengths
+   - Check: Verify table name is `applicant_info` and columns are `reason`, `experience`, `skill`
+   - Verify data exists: `docker exec postgres-container psql -U admin -d applicants_db -c "SELECT id, length(reason), length(experience), length(skill) FROM applicant_info;"`
+
+### Docker Network Issues
+
+**Container cannot connect to PostgreSQL/Ollama:**
+- Containers must be on the same Docker network OR use host IP
+- Check network: `docker network inspect network-name`
+- Connect to network: `docker network connect network-name backend`
+
+### Code Changes Without Rebuilding
+
+**When you only modify Python/JavaScript files:**
+```bash
+# Copy modified files to running container (no package changes)
+docker cp backend/app/models/applicant.py backend:/app/app/models/
+docker cp backend/app/api/analysis.py backend:/app/app/api/
+
+# Restart container
+docker-compose restart backend
+```
+
+**Note:** Only works if no new packages added to requirements.txt
