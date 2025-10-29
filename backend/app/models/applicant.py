@@ -9,6 +9,7 @@ class Applicant(SQLModel, table=True):
     PostgreSQL의 applicant_info 테이블과 매핑됨
     """
     __tablename__ = "applicant_info"
+    __table_args__ = {"schema": "rsaillm"}
 
     id: Optional[int] = Field(default=None, primary_key=True)
     reason: Optional[str] = Field(default=None, sa_column=Column(String(4000)))  # 지원 동기
