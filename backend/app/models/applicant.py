@@ -1,6 +1,7 @@
 from sqlmodel import SQLModel, Field, Column
 from sqlalchemy import String
 from typing import Optional
+import os
 
 
 class Applicant(SQLModel, table=True):
@@ -9,7 +10,7 @@ class Applicant(SQLModel, table=True):
     PostgreSQL의 applicant_info 테이블과 매핑됨
     """
     __tablename__ = "applicant_info"
-    __table_args__ = {"schema": "rsaillm"}
+    __table_args__ = {"schema": os.getenv("DB_SCHEMA", "public")}
 
     id: Optional[int] = Field(default=None, primary_key=True)
     reason: Optional[str] = Field(default=None, sa_column=Column(String(4000)))  # 지원 동기
