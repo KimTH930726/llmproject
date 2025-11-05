@@ -29,3 +29,144 @@ INSERT INTO applicant_info (reason, experience, skill) VALUES
 
 -- 인덱스 생성 (검색 성능 향상)
 CREATE INDEX IF NOT EXISTS idx_applicant_info_id ON applicant_info(id);
+
+
+-- ===================================================
+-- Few-shot 및 Intent 관리 테이블 생성
+-- ===================================================
+
+-- 1. Intent 테이블 생성 (키워드-의도 매핑)
+CREATE TABLE IF NOT EXISTS intents (
+    id SERIAL PRIMARY KEY,
+    keyword VARCHAR(200) NOT NULL,
+    intent_type VARCHAR(100) NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0,
+    description VARCHAR(500),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Intent 테이블 인덱스
+CREATE INDEX IF NOT EXISTS idx_intents_keyword ON intents(keyword);
+CREATE INDEX IF NOT EXISTS idx_intents_intent_type ON intents(intent_type);
+CREATE INDEX IF NOT EXISTS idx_intents_priority ON intents(priority DESC);
+
+-- 2. 질의 로그 테이블 생성 (모든 사용자 질의 자동 저장)
+CREATE TABLE IF NOT EXISTS query_logs (
+    id BIGSERIAL PRIMARY KEY,
+    query_text TEXT NOT NULL,
+    detected_intent VARCHAR(100),
+    response TEXT,
+    is_converted_to_fewshot BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 질의 로그 테이블 인덱스
+CREATE INDEX IF NOT EXISTS idx_query_logs_is_converted ON query_logs(is_converted_to_fewshot);
+CREATE INDEX IF NOT EXISTS idx_query_logs_intent ON query_logs(detected_intent);
+CREATE INDEX IF NOT EXISTS idx_query_logs_created_at ON query_logs(created_at DESC);
+
+-- 3. Few-shot 예제 테이블 생성 (승격된 예제만)
+CREATE TABLE IF NOT EXISTS few_shots (
+    id SERIAL PRIMARY KEY,
+    source_query_log_id BIGINT REFERENCES query_logs(id) ON DELETE SET NULL,
+    intent_type VARCHAR(100),
+    user_query TEXT NOT NULL,
+    expected_response TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Few-shot 테이블 인덱스
+CREATE INDEX IF NOT EXISTS idx_few_shots_source_query_log_id ON few_shots(source_query_log_id);
+CREATE INDEX IF NOT EXISTS idx_few_shots_intent_type ON few_shots(intent_type);
+CREATE INDEX IF NOT EXISTS idx_few_shots_is_active ON few_shots(is_active);
+
+-- 4. Few-shot Audit 테이블 생성
+CREATE TABLE IF NOT EXISTS few_shot_audit (
+    id SERIAL PRIMARY KEY,
+    few_shot_id INTEGER NOT NULL REFERENCES few_shots(id) ON DELETE CASCADE,
+    action VARCHAR(20) NOT NULL CHECK (action IN ('INSERT', 'UPDATE', 'DELETE')),
+    old_value JSONB,
+    new_value JSONB,
+    changed_by VARCHAR(100) DEFAULT 'system',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Few-shot Audit 테이블 인덱스
+CREATE INDEX IF NOT EXISTS idx_few_shot_audit_few_shot_id ON few_shot_audit(few_shot_id);
+CREATE INDEX IF NOT EXISTS idx_few_shot_audit_action ON few_shot_audit(action);
+CREATE INDEX IF NOT EXISTS idx_few_shot_audit_created_at ON few_shot_audit(created_at DESC);
+
+-- 5. 기본 Intent 데이터 삽입 (키워드-의도 매핑 예시)
+INSERT INTO intents (keyword, intent_type, priority, description) VALUES
+    -- RAG 검색 관련 키워드
+    ('검색', 'rag_search', 10, '문서 검색 의도'),
+    ('찾아줘', 'rag_search', 10, '문서 찾기 의도'),
+    ('알려줘', 'rag_search', 5, '정보 요청 의도'),
+    ('문서', 'rag_search', 8, '문서 관련 질의'),
+
+    -- SQL 쿼리 관련 키워드
+    ('몇명', 'sql_query', 10, '수량 질의'),
+    ('통계', 'sql_query', 10, '통계 질의'),
+    ('총', 'sql_query', 8, '집계 질의'),
+    ('평균', 'sql_query', 10, '평균 계산 질의'),
+    ('개수', 'sql_query', 10, '카운트 질의'),
+
+    -- 일반 대화 키워드
+    ('안녕', 'general', 10, '인사 의도'),
+    ('고마워', 'general', 10, '감사 표현'),
+    ('도와줘', 'general', 5, '도움 요청')
+ON CONFLICT DO NOTHING;
+
+-- 6. Trigger Function: updated_at 자동 업데이트
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Few-shot 테이블 트리거
+DROP TRIGGER IF EXISTS update_few_shots_updated_at ON few_shots;
+CREATE TRIGGER update_few_shots_updated_at
+    BEFORE UPDATE ON few_shots
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- Intent 테이블 트리거
+DROP TRIGGER IF EXISTS update_intents_updated_at ON intents;
+CREATE TRIGGER update_intents_updated_at
+    BEFORE UPDATE ON intents
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- 7. Trigger Function: Few-shot Audit 자동 기록
+CREATE OR REPLACE FUNCTION log_few_shot_audit()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF (TG_OP = 'DELETE') THEN
+        INSERT INTO few_shot_audit (few_shot_id, action, old_value, changed_by)
+        VALUES (OLD.id, 'DELETE', row_to_json(OLD), 'system');
+        RETURN OLD;
+    ELSIF (TG_OP = 'UPDATE') THEN
+        INSERT INTO few_shot_audit (few_shot_id, action, old_value, new_value, changed_by)
+        VALUES (NEW.id, 'UPDATE', row_to_json(OLD), row_to_json(NEW), 'system');
+        RETURN NEW;
+    ELSIF (TG_OP = 'INSERT') THEN
+        INSERT INTO few_shot_audit (few_shot_id, action, new_value, changed_by)
+        VALUES (NEW.id, 'INSERT', row_to_json(NEW), 'system');
+        RETURN NEW;
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Few-shot Audit 트리거
+DROP TRIGGER IF EXISTS few_shot_audit_trigger ON few_shots;
+CREATE TRIGGER few_shot_audit_trigger
+    AFTER INSERT OR UPDATE OR DELETE ON few_shots
+    FOR EACH ROW
+    EXECUTE FUNCTION log_few_shot_audit();
