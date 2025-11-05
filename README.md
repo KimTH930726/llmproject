@@ -51,7 +51,8 @@ PostgreSQL에 저장된 채용 지원자의 자기소개서를 LLM으로 자동 
 #### 1. 인터넷 환경에서 준비
 
 ```bash
-# 베이스 이미지 내보내기 (amd64 아키텍처)
+# 베이스 이미지 내보내기 (Linux AMD64 아키텍처)
+# 맥/윈도우에서 실행 시 --platform linux/amd64 필수!
 docker pull --platform linux/amd64 python:3.11-slim && docker save -o python-3.11-slim.tar python:3.11-slim
 docker pull --platform linux/amd64 node:20-alpine && docker save -o node-20-alpine.tar node:20-alpine
 docker pull --platform linux/amd64 nginx:alpine && docker save -o nginx-alpine.tar nginx:alpine
@@ -59,7 +60,7 @@ docker pull --platform linux/amd64 nginx:alpine && docker save -o nginx-alpine.t
 # Python 패키지 다운로드 (Linux 서버용)
 # 프로젝트 루트에서 실행
 mkdir -p python-packages
-docker run --rm \
+docker run --rm --platform linux/amd64 \
   -v $(pwd)/backend:/workspace/backend \
   -v $(pwd)/python-packages:/workspace/python-packages \
   -w /workspace/backend \

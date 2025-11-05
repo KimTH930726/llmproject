@@ -122,6 +122,18 @@ User Query → ChatAPI → QueryRouter (Intent 분류)
 
 **중요**: 이 프로젝트는 **폐쇄망 서버 배포**를 위해 설계되었습니다. docker-compose.yml은 backend와 frontend만 포함하며, PostgreSQL과 Ollama는 서버에 이미 실행 중이어야 합니다.
 
+**로컬 개발 환경**: 전체 스택(PostgreSQL, Ollama, Qdrant 포함)을 로컬에서 실행하려면 `docker-compose.dev.yml`을 사용하세요:
+
+```bash
+# 전체 스택 시작 (모든 서비스 포함)
+docker-compose -f docker-compose.dev.yml up -d
+
+# Ollama 모델 다운로드 (최초 1회)
+docker exec -it ollama ollama pull llama3.2:1b
+
+# 상세 가이드는 LOCAL-DEV-GUIDE.md 참조
+```
+
 ```bash
 # 환경 변수 설정 (서버의 PostgreSQL, Ollama 정보)
 cd backend
@@ -304,13 +316,15 @@ API 문서: http://localhost:8000/docs
 │   ├── package.json
 │   └── vite.config.ts
 │
-├── python-packages/    # 오프라인 Python 패키지 (준비 후 생성)
-├── init.sql           # PostgreSQL 초기화 스크립트 (테이블 생성 + 샘플 데이터)
-├── docker-compose.yml # Docker Compose 설정 (backend, frontend만)
-├── SETUP-GUIDE.md     # 폐쇄망 배포 상세 가이드
-├── DEPLOY.md          # 배포 및 문제 해결 가이드
-├── CLAUDE.md          # Claude Code 개발 가이드
-└── README.md          # 프로젝트 문서 (폐쇄망 배포 중심)
+├── python-packages/        # 오프라인 Python 패키지 (준비 후 생성)
+├── init.sql               # PostgreSQL 초기화 스크립트 (테이블 생성 + 샘플 데이터)
+├── docker-compose.yml     # Docker Compose 설정 (backend, frontend만 - 폐쇄망용)
+├── docker-compose.dev.yml # Docker Compose 설정 (전체 스택 - 로컬 개발용)
+├── SETUP-GUIDE.md         # 폐쇄망 배포 상세 가이드
+├── LOCAL-DEV-GUIDE.md     # 로컬 개발 환경 가이드
+├── DEPLOY.md              # 배포 및 문제 해결 가이드
+├── CLAUDE.md              # Claude Code 개발 가이드
+└── README.md              # 프로젝트 문서 (폐쇄망 배포 중심)
 ```
 
 ## 폐쇄망 배포
@@ -335,15 +349,16 @@ docker run -d --name qdrant \
 ### 인터넷 환경 준비 (사전 작업)
 
 ```bash
-# 1. 베이스 Docker 이미지 내보내기
-docker pull python:3.11-slim && docker save -o python-3.11-slim.tar python:3.11-slim
-docker pull node:20-alpine && docker save -o node-20-alpine.tar node:20-alpine
-docker pull nginx:alpine && docker save -o nginx-alpine.tar nginx:alpine
+# 1. 베이스 Docker 이미지 내보내기 (Linux AMD64용)
+docker pull --platform linux/amd64 python:3.11-slim && docker save -o python-3.11-slim.tar python:3.11-slim
+docker pull --platform linux/amd64 node:20-alpine && docker save -o node-20-alpine.tar node:20-alpine
+docker pull --platform linux/amd64 nginx:alpine && docker save -o nginx-alpine.tar nginx:alpine
 
 # 2. Python 패키지 다운로드 (오프라인 설치용, Linux 서버용)
 # 프로젝트 루트에서 실행
+# 맥/윈도우에서도 Linux용 패키지를 다운로드하기 위해 --platform 사용
 mkdir -p python-packages
-docker run --rm \
+docker run --rm --platform linux/amd64 \
   -v $(pwd)/backend:/workspace/backend \
   -v $(pwd)/python-packages:/workspace/python-packages \
   -w /workspace/backend \
