@@ -9,7 +9,7 @@ class QueryLog(SQLModel, table=True):
     """질의 로그 테이블 - 모든 사용자 질의 자동 저장"""
     __tablename__ = "query_logs"
 
-    id: Optional[int] = Field(default=None, primary_key=True, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
+    id: Optional[int] = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
     query_text: str = Field(sa_column=Column(Text, nullable=False))
     detected_intent: Optional[str] = Field(default=None, sa_column=Column(String(100)))
     response: Optional[str] = Field(default=None, sa_column=Column(Text))

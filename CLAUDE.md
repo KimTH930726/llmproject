@@ -19,6 +19,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 6. **자연어 SQL** - 자연어 질의를 SQL로 변환하여 데이터베이스 조회
 7. **QueryRouter** - 사용자 질의 의도 자동 분류 (문서 검색 vs DB 쿼리 vs 일반 대화)
 
+#### Intent & Few-shot 관리 (신규)
+8. **Intent 관리** - 키워드 기반 의도 분류 (LLM 우회하여 빠른 응답)
+9. **질의 로그** - 모든 사용자 질의 자동 저장 및 추적
+10. **Few-shot 관리** - 질의 로그를 Few-shot 예제로 승격하여 LLM 프롬프트에 활용
+
 ## Tech Stack
 
 ### Backend
@@ -40,14 +45,52 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Architecture
 
 ### Database Schema
+
+#### Applicant Info (기존)
 PostgreSQL `applicant_info` 테이블:
 - `id` (BIGSERIAL PRIMARY KEY) - 지원자 ID
 - `reason` (VARCHAR(4000)) - 지원 동기
 - `experience` (VARCHAR(4000)) - 경력 및 경험
 - `skill` (VARCHAR(4000)) - 기술 스택 및 역량
 
-**폐쇄망 서버**: 테이블이 이미 생성되어 있어야 합니다
-**개발/테스트 환경**: [init.sql](init.sql)로 테이블 생성 및 샘플 데이터 삽입 가능
+#### Intent & Few-shot Tables (신규)
+
+**intents** 테이블 - 키워드 기반 의도 매핑:
+- `id` (SERIAL PRIMARY KEY)
+- `keyword` (VARCHAR(200)) - 키워드 (예: "계약서", "지원자")
+- `intent_type` (VARCHAR(100)) - 의도 타입 (rag_search, sql_query, general)
+- `priority` (INTEGER) - 우선순위 (높을수록 먼저 매칭)
+- `description` (VARCHAR(500))
+- `created_at`, `updated_at` (TIMESTAMP)
+
+**query_logs** 테이블 - 모든 사용자 질의 자동 저장:
+- `id` (BIGSERIAL PRIMARY KEY)
+- `query_text` (TEXT) - 질의 내용
+- `detected_intent` (VARCHAR(100)) - 감지된 의도
+- `response` (TEXT) - 응답 내용
+- `is_converted_to_fewshot` (BOOLEAN) - Few-shot으로 승격 여부
+- `created_at` (TIMESTAMP)
+
+**few_shots** 테이블 - Few-shot 학습 예제:
+- `id` (SERIAL PRIMARY KEY)
+- `source_query_log_id` (BIGINT) - 원본 질의 로그 ID (FK to query_logs)
+- `intent_type` (VARCHAR(100)) - 의도 타입
+- `user_query` (TEXT) - 사용자 질의 예제
+- `expected_response` (TEXT) - 예상 응답
+- `is_active` (BOOLEAN) - 활성화 여부 (프롬프트 포함 여부)
+- `created_at`, `updated_at` (TIMESTAMP)
+
+**few_shot_audit** 테이블 - Few-shot 변경 이력 (트리거 자동 생성):
+- `id` (SERIAL PRIMARY KEY)
+- `few_shot_id` (INTEGER) - FK to few_shots
+- `action` (VARCHAR(20)) - INSERT, UPDATE, DELETE
+- `old_value` (JSONB) - 변경 전 값
+- `new_value` (JSONB) - 변경 후 값
+- `changed_by` (VARCHAR(100)) - 변경자
+- `created_at` (TIMESTAMP)
+
+**폐쇄망 서버**: 모든 테이블이 이미 생성되어 있어야 합니다
+**개발/테스트 환경**: [init.sql](init.sql)로 모든 테이블 생성 및 샘플 데이터 삽입 가능
 
 ### Request Flow
 
@@ -80,6 +123,34 @@ User Query → ChatAPI → QueryRouter (Intent 분류)
                     ChatResponse
 ```
 
+#### 4. Intent & Few-shot Workflow (신규)
+**Intent-based Classification**:
+```
+User Query → Check intents table (keyword matching)
+                ↓
+         Match found? ─Yes→ Use matched intent_type (bypass LLM)
+                ↓
+               No
+                ↓
+           LLM-based classification
+```
+
+**Few-shot Learning Workflow**:
+```
+1. User Query → Auto-save to query_logs table
+2. Admin reviews query_logs in management UI
+3. Admin clicks "승격" button on selected query
+4. Query converted to few_shots table with:
+   - source_query_log_id (links back to original)
+   - intent_type, user_query, expected_response
+   - is_active = true (included in prompts)
+5. When generating LLM prompts:
+   - Fetch all few_shots where is_active = true
+   - Include as examples in prompt
+6. Admin can toggle is_active or delete few_shot
+   - Deleting resets query_log.is_converted_to_fewshot flag
+```
+
 ### Key Architectural Patterns
 
 #### Analysis-Only API (기존)
@@ -96,6 +167,16 @@ User Query → ChatAPI → QueryRouter (Intent 분류)
 - **Vector Search**: Qdrant에서 의미 기반 유사도 검색 (코사인 유사도)
 - **Text Extraction**: 다양한 파일 형식 (PDF, DOCX, TXT, XLSX)에서 텍스트 추출
 - **Embedding Model**: 한국어 지원 Sentence Transformer (jhgan/ko-sroberta-multitask)
+
+#### Intent & Few-shot Pattern (신규)
+- **Two-tier Intent Classification**:
+  - Tier 1: Keyword-based matching (fast, deterministic, bypasses LLM)
+  - Tier 2: LLM-based classification (fallback for unmatched queries)
+- **Query Logging**: All user queries automatically saved to `query_logs` table
+- **Manual Curation**: Admins review logs and promote valuable queries to few-shots
+- **Active Learning**: Only `is_active=true` few-shots included in prompts
+- **Audit Trail**: PostgreSQL triggers automatically log all few-shot changes to `few_shot_audit`
+- **Bidirectional Updates**: Deleting few-shot resets `query_log.is_converted_to_fewshot` flag
 
 #### Dependency Injection
 - SQLModel `Session` is injected via FastAPI's `Depends(get_session)`
@@ -275,6 +356,36 @@ ollama pull llama3.2:1b
   - Response: `{ "query": string, "intent_simple": string, "intent_llm": string }`
   - 규칙 기반과 LLM 기반 분류 결과 비교
 
+### 4. Intent 관리 (신규)
+- `GET /api/intent/` - 모든 Intent 목록 조회
+- `GET /api/intent/{id}` - 특정 Intent 조회
+- `POST /api/intent/` - Intent 생성
+  - Request: `{ "keyword": string, "intent_type": string, "priority": int, "description": string }`
+- `PUT /api/intent/{id}` - Intent 수정
+- `DELETE /api/intent/{id}` - Intent 삭제
+
+### 5. 질의 로그 관리 (신규)
+- `GET /api/query-logs/` - 질의 로그 목록 조회 (필터링 가능)
+  - Query params: `skip`, `limit`, `intent`, `converted_only`, `search`
+- `POST /api/query-logs/` - 질의 로그 생성 (자동 호출용)
+- `DELETE /api/query-logs/{id}` - 질의 로그 삭제
+- `POST /api/query-logs/convert-to-fewshot` - 질의 로그를 Few-shot으로 승격
+  - Request: `{ "query_log_id": int, "intent_type": string, "expected_response": string, "is_active": bool }`
+  - 자동으로 `is_converted_to_fewshot` 플래그 설정
+- `GET /api/query-logs/stats/summary` - 질의 로그 통계 (총 개수, 변환율, Intent별 분포)
+
+### 6. Few-shot 관리 (신규)
+- `GET /api/fewshot/` - Few-shot 목록 조회 (필터링 가능)
+  - Query params: `intent_type`, `is_active`
+- `GET /api/fewshot/{id}` - 특정 Few-shot 조회
+- `POST /api/fewshot/` - Few-shot 생성
+  - Request: `{ "source_query_log_id": int, "intent_type": string, "user_query": string, "expected_response": string, "is_active": bool }`
+- `PUT /api/fewshot/{id}` - Few-shot 수정 (is_active 토글 가능)
+- `DELETE /api/fewshot/{id}` - Few-shot 삭제
+  - 자동으로 연결된 query_log의 `is_converted_to_fewshot` 플래그를 false로 리셋
+- `GET /api/fewshot/audit/` - Few-shot 변경 이력 조회
+- `GET /api/fewshot/audit/{few_shot_id}` - 특정 Few-shot의 변경 이력
+
 API 문서: http://localhost:8000/docs
 
 ## Project Structure
@@ -286,10 +397,15 @@ API 문서: http://localhost:8000/docs
 │   │   ├── api/              # API 라우터
 │   │   │   ├── analysis.py   # 분석 API (요약, 키워드, 면접질문) - 기존
 │   │   │   ├── chat.py       # RAG 채팅 API (QueryRouter 라우팅) - 신규
-│   │   │   └── upload.py     # 문서 업로드 API - 신규
+│   │   │   ├── upload.py     # 문서 업로드 API - 신규
+│   │   │   ├── intent.py     # Intent 관리 CRUD API - 신규
+│   │   │   ├── query_log.py  # 질의 로그 관리 API - 신규
+│   │   │   └── fewshot.py    # Few-shot 관리 CRUD API - 신규
 │   │   ├── models/           # Pydantic/SQLModel 데이터 모델
 │   │   │   ├── applicant.py  # Applicant (테이블 모델, 4개 컬럼) - 기존
-│   │   │   └── chat.py       # 채팅 요청/응답 모델 - 신규
+│   │   │   ├── chat.py       # 채팅 요청/응답 모델 - 신규
+│   │   │   ├── query_log.py  # QueryLog (질의 로그 테이블) - 신규
+│   │   │   └── few_shot.py   # Intent, FewShot, FewShotAudit 모델 - 신규
 │   │   ├── services/         # 비즈니스 로직
 │   │   │   ├── ollama_service.py  # Ollama LLM 연동 - 기존
 │   │   │   ├── qdrant_service.py  # Qdrant 벡터 DB 연동 - 신규
@@ -308,7 +424,10 @@ API 문서: http://localhost:8000/docs
 ├── frontend/            # React 프론트엔드
 │   ├── src/
 │   │   ├── components/  # React 컴포넌트
-│   │   ├── App.tsx
+│   │   │   ├── IntentManagement.tsx      # Intent 관리 UI - 신규
+│   │   │   ├── QueryLogManagement.tsx    # 질의 로그 관리 UI - 신규
+│   │   │   └── FewShotManagement.tsx     # Few-shot 관리 UI - 신규
+│   │   ├── App.tsx      # 메인 앱 (3 탭: Intent, QueryLog, FewShot)
 │   │   ├── main.tsx
 │   │   └── index.css   # Tailwind CSS
 │   ├── Dockerfile
@@ -316,13 +435,18 @@ API 문서: http://localhost:8000/docs
 │   ├── package.json
 │   └── vite.config.ts
 │
+├── migrations/             # 데이터베이스 마이그레이션 스크립트
+│   ├── 001_create_fewshot_tables.sql  # 초기 Few-shot 테이블 생성
+│   └── 002_update_fewshot_to_querylog.sql  # QueryLog 워크플로우 전환
 ├── python-packages/        # 오프라인 Python 패키지 (준비 후 생성)
-├── init.sql               # PostgreSQL 초기화 스크립트 (테이블 생성 + 샘플 데이터)
+├── init.sql               # PostgreSQL 초기화 스크립트 (모든 테이블 + 샘플 데이터)
 ├── docker-compose.yml     # Docker Compose 설정 (backend, frontend만 - 폐쇄망용)
 ├── docker-compose.dev.yml # Docker Compose 설정 (전체 스택 - 로컬 개발용)
 ├── SETUP-GUIDE.md         # 폐쇄망 배포 상세 가이드
 ├── LOCAL-DEV-GUIDE.md     # 로컬 개발 환경 가이드
 ├── DEPLOY.md              # 배포 및 문제 해결 가이드
+├── FEWSHOT_FEATURE_GUIDE.md  # Few-shot 기능 사용 가이드
+├── RAG_IMPLEMENTATION.md  # RAG 기능 구현 보고서
 ├── CLAUDE.md              # Claude Code 개발 가이드
 └── README.md              # 프로젝트 문서 (폐쇄망 배포 중심)
 ```
@@ -408,12 +532,17 @@ docker-compose up -d --build
 - CORS: Currently allows http://localhost:5173 (Vite dev server) in [main.py](backend/app/main.py)
 
 ### Database Management
-- **Analysis-Only**: 이 애플리케이션은 데이터를 읽기만 하며, 조회 API도 없음 (분석 API만 제공)
-- **폐쇄망 서버**: `applicant_info` 테이블이 이미 존재해야 함 (id, reason, experience, skill)
-- **개발/테스트 환경**: [init.sql](init.sql)로 테이블 생성 및 샘플 데이터 삽입 가능
+- **Analysis-Only**: 이 애플리케이션은 지원자 데이터를 읽기만 하며, 조회 API도 없음 (분석 API만 제공)
+- **폐쇄망 서버**: 모든 테이블이 이미 존재해야 함
+  - `applicant_info` (id, reason, experience, skill)
+  - `intents`, `query_logs`, `few_shots`, `few_shot_audit`
+- **개발/테스트 환경**: [init.sql](init.sql)로 모든 테이블 생성 및 샘플 데이터 삽입 가능
   - 수동 실행: `psql -d applicants_db -f init.sql`
 - FastAPI는 테이블을 생성하지 않음 (no lifespan events)
-- **Migration strategy**: Manual SQL scripts (no Alembic configured)
+- **Migration strategy**: Manual SQL scripts in `migrations/` directory (no Alembic configured)
+  - `001_create_fewshot_tables.sql` - 초기 Intent/Few-shot 테이블
+  - `002_update_fewshot_to_querylog.sql` - QueryLog 워크플로우 전환
+  - 실행 방법: `psql -d applicants_db -f migrations/002_update_fewshot_to_querylog.sql`
 
 ### PostgreSQL Connection
 - Connection pooling handled by SQLModel/SQLAlchemy
@@ -443,6 +572,24 @@ docker-compose up -d --build
   - How to change vector dimension
   - Performance optimization tips
   - Troubleshooting guide
+
+### Intent & Few-shot Workflow
+- **Intent Usage**: Pre-emptive keyword-based intent detection
+  - When user query arrives, check `intents` table first (keyword matching)
+  - If matched, use that `intent_type` directly (bypasses LLM)
+  - If no match, fall back to LLM-based classification
+  - Higher priority intents are checked first
+- **Few-shot Usage**: Manual curation of valuable examples
+  - All user queries automatically logged to `query_logs` table
+  - Admin reviews logs in management UI (http://localhost)
+  - Admin clicks "승격" button to convert valuable queries to few-shots
+  - Only `is_active=true` few-shots are included in LLM prompts
+  - Admin can toggle `is_active` or delete few-shots as needed
+  - Deleting few-shot automatically resets `query_log.is_converted_to_fewshot` flag
+- **Audit Trail**: All few-shot changes automatically logged via PostgreSQL triggers
+  - Triggers execute on INSERT, UPDATE, DELETE
+  - Old/new values stored as JSONB in `few_shot_audit` table
+  - See [FEWSHOT_FEATURE_GUIDE.md](FEWSHOT_FEATURE_GUIDE.md) for detailed usage
 
 ### Adding New Features
 
