@@ -193,11 +193,19 @@ OLLAMA_MODEL=llama3.2:1b
 
 # PostgreSQL 설정 (서버의 PostgreSQL 컨테이너)
 DATABASE_URL=postgresql://admin:admin123@postgres:5432/applicants_db
+DB_SCHEMA=public
+
+# Qdrant 설정 (서버의 Qdrant 컨테이너) - RAG 기능용
+QDRANT_URL=http://qdrant:6333
+QDRANT_COLLECTION_NAME=documents
+
+# 임베딩 모델 설정 (한국어 지원)
+EMBEDDING_MODEL=jhgan/ko-sroberta-multitask
 ```
 
 **네트워크 연결 예시:**
-- 같은 Docker 네트워크: `http://ollama:11434`
-- 다른 네트워크: `http://172.17.0.1:11434`
+- 같은 Docker 네트워크: `http://ollama:11434`, `http://qdrant:6333`
+- 다른 네트워크: `http://172.17.0.1:11434`, `http://172.17.0.1:6333`
 - 컨테이너 이름으로 연결: `http://<container-name>:11434`
 
 ---
@@ -206,31 +214,67 @@ DATABASE_URL=postgresql://admin:admin123@postgres:5432/applicants_db
 
 ```
 llmproject/
-├── backend/                    # FastAPI 백엔드
+├── backend/                        # FastAPI 백엔드
 │   ├── app/
-│   │   ├── api/
-│   │   │   └── analysis.py     # 분석 API (요약, 키워드, 면접질문)
-│   │   ├── models/
-│   │   │   └── applicant.py    # 지원자 모델
-│   │   ├── services/
-│   │   │   └── ollama_service.py  # LLM 서비스
-│   │   ├── database.py         # DB 연결
-│   │   └── main.py             # FastAPI 앱
-│   ├── Dockerfile.offline      # 오프라인 빌드용
-│   ├── requirements.txt
-│   └── .env.example
+│   │   ├── api/                    # API 라우터
+│   │   │   ├── analysis.py         # 지원자 분석 API (요약, 키워드, 면접질문)
+│   │   │   ├── chat.py             # RAG 채팅 API (QueryRouter 라우팅)
+│   │   │   ├── upload.py           # 문서 업로드 API
+│   │   │   ├── intent.py           # Intent 관리 CRUD API
+│   │   │   ├── query_log.py        # 질의 로그 관리 API
+│   │   │   └── fewshot.py          # Few-shot 관리 CRUD API
+│   │   ├── models/                 # 데이터 모델
+│   │   │   ├── applicant.py        # Applicant 테이블 모델
+│   │   │   ├── chat.py             # 채팅 요청/응답 모델
+│   │   │   ├── query_log.py        # QueryLog 테이블 모델
+│   │   │   └── few_shot.py         # Intent, FewShot, FewShotAudit 모델
+│   │   ├── services/               # 비즈니스 로직
+│   │   │   ├── ollama_service.py   # Ollama LLM 연동
+│   │   │   ├── qdrant_service.py   # Qdrant 벡터 DB 연동
+│   │   │   ├── rag_service.py      # RAG 검색 및 답변 생성
+│   │   │   ├── query_router.py     # Intent 분류 (Two-tier)
+│   │   │   └── sql_agent.py        # 자연어 → SQL 변환 및 실행
+│   │   ├── utils/                  # 유틸리티
+│   │   │   └── text_extractor.py   # 파일 텍스트 추출 (PDF/DOCX/TXT/XLSX)
+│   │   ├── database.py             # PostgreSQL 연결 및 세션 관리
+│   │   └── main.py                 # FastAPI 앱 엔트리포인트
+│   ├── Dockerfile                  # 일반 빌드용
+│   ├── Dockerfile.offline          # 오프라인 빌드용 (python-packages 사용)
+│   ├── requirements.txt            # Python 의존성 (RAG 패키지 포함)
+│   └── .env.example                # 환경 변수 템플릿
 │
-├── frontend/                   # React 프론트엔드
+├── frontend/                       # React 프론트엔드
 │   ├── src/
+│   │   ├── components/
+│   │   │   ├── IntentManagement.tsx       # Intent 관리 UI
+│   │   │   ├── QueryLogManagement.tsx     # 질의 로그 관리 UI
+│   │   │   └── FewShotManagement.tsx      # Few-shot 관리 UI
+│   │   ├── App.tsx                 # 메인 앱
+│   │   ├── main.tsx
+│   │   └── index.css
 │   ├── Dockerfile
 │   ├── nginx.conf
-│   └── package.json
+│   ├── package.json
+│   └── vite.config.ts
 │
-├── python-packages/            # 오프라인 Python 패키지 (준비 후 생성)
-├── docker-compose.yml          # Backend, Frontend 설정
-├── init.sql                    # DB 초기화 스크립트
-├── SETUP-GUIDE.md              # 폐쇄망 배포 가이드
-└── README.md
+├── migrations/                     # 데이터베이스 마이그레이션 스크립트
+│   ├── 001_create_fewshot_tables.sql
+│   └── 002_update_fewshot_to_querylog.sql
+│
+├── python-packages/                # 오프라인 Python 패키지 (준비 후 생성)
+├── docker-compose.yml              # Backend, Frontend 설정 (폐쇄망용)
+├── docker-compose.dev.yml          # 전체 스택 설정 (로컬 개발용)
+├── init.sql                        # DB 초기화 스크립트 (모든 테이블 + 샘플 데이터)
+│
+├── SETUP-GUIDE.md                  # 폐쇄망 배포 상세 가이드
+├── LOCAL-DEV-GUIDE.md              # 로컬 개발 환경 가이드
+├── DEPLOY.md                       # 배포 및 문제 해결 가이드
+├── CLAUDE.md                       # Claude Code 개발 가이드
+├── TECH-COMPARISON.md              # 기술 비교 분석 (LangChain 등)
+├── FEWSHOT_FEATURE_GUIDE.md        # Few-shot 기능 사용 가이드
+├── RAG_IMPLEMENTATION.md           # RAG 기능 구현 보고서
+├── EMBEDDING_MODEL_GUIDE.md        # 임베딩 모델 변경 가이드
+└── README.md                       # 프로젝트 문서 (이 파일)
 ```
 
 ---
@@ -286,28 +330,37 @@ docker-compose up -d --build backend
 ## 📖 추가 문서
 
 - [SETUP-GUIDE.md](SETUP-GUIDE.md) - 폐쇄망 서버 배포 상세 가이드
+- [LOCAL-DEV-GUIDE.md](LOCAL-DEV-GUIDE.md) - 로컬 개발 환경 가이드
 - [DEPLOY.md](DEPLOY.md) - 배포 및 문제 해결
 - [CLAUDE.md](CLAUDE.md) - 개발 가이드 (Claude Code용)
-- [RAG_IMPLEMENTATION.md](RAG_IMPLEMENTATION.md) - RAG 기능 구현 보고서 (신규)
-- [EMBEDDING_MODEL_GUIDE.md](EMBEDDING_MODEL_GUIDE.md) - 임베딩 모델 변경 가이드 (신규)
+- [TECH-COMPARISON.md](TECH-COMPARISON.md) - 기술 비교 분석 (LangChain 등)
+- [FEWSHOT_FEATURE_GUIDE.md](FEWSHOT_FEATURE_GUIDE.md) - Few-shot 기능 사용 가이드
+- [RAG_IMPLEMENTATION.md](RAG_IMPLEMENTATION.md) - RAG 기능 구현 보고서
+- [EMBEDDING_MODEL_GUIDE.md](EMBEDDING_MODEL_GUIDE.md) - 임베딩 모델 변경 가이드
 
 ---
 
 ## 🏗️ 아키텍처
 
-### 요청 흐름
+### 시스템 구조
 ```
-Client → Frontend (Nginx)
-         ↓
-      Backend (FastAPI)
-         ↓
-      PostgreSQL (조회) → Ollama (LLM 분석) → Response
+Client (Browser)
+    ↓
+Frontend (React + Nginx)
+    ↓
+Backend (FastAPI)
+    ├── PostgreSQL (지원자 정보, Intent, Query Logs, Few-shots)
+    ├── Ollama (LLM - llama3.2:1b)
+    └── Qdrant (Vector DB - 문서 임베딩)
 ```
 
 ### 주요 패턴
-- **Dependency Injection**: FastAPI의 `Depends()`를 통한 세션 관리
-- **Singleton Pattern**: `OllamaService` 인스턴스 재사용
-- **분석 전용 API**: 읽기 전용 데이터베이스 접근
+- **Two-tier Intent Classification**: 키워드 매칭 (빠름) → LLM 분류 (fallback)
+- **Few-shot Integration**: 모든 서비스가 DB에서 활성 예제 조회하여 프롬프트에 포함
+- **Query Logging**: 모든 질의 자동 저장 → 관리 UI에서 Few-shot으로 승격 가능
+- **Dependency Injection**: FastAPI `Depends()`를 통한 세션 관리
+- **Singleton Services**: OllamaService, QdrantService 등 싱글톤 인스턴스
+- **읽기 전용 DB**: PostgreSQL 지원자 데이터는 조회만 가능
 
 ---
 
