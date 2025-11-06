@@ -1,7 +1,8 @@
 import httpx
-from typing import Optional
+from typing import Optional, List
 import os
 from dotenv import load_dotenv
+from sqlmodel import Session, select
 
 load_dotenv()
 
@@ -95,6 +96,68 @@ class OllamaService:
 
         # 정확히 10개만 반환
         return cleaned_questions[:10]
+
+    async def generate_with_fewshot(
+        self,
+        query: str,
+        session: Optional[Session] = None,
+        intent_type: Optional[str] = None
+    ) -> str:
+        """
+        Few-shot 예제를 포함한 일반 대화 생성
+
+        Args:
+            query: 사용자 질의
+            session: DB 세션 (Few-shot 조회용)
+            intent_type: 의도 타입 (few-shot 필터링용)
+
+        Returns:
+            LLM 응답
+        """
+        # Few-shot 예제 가져오기
+        few_shots = self._get_active_fewshots(session, intent_type) if session else []
+
+        # 프롬프트 빌드
+        prompt_parts = []
+
+        # Few-shot 예제 추가
+        if few_shots:
+            prompt_parts.append("다음은 대화 예제입니다:\n")
+            for idx, fs in enumerate(few_shots, 1):
+                prompt_parts.append(f"예제 {idx}:")
+                prompt_parts.append(f"사용자: {fs.user_query}")
+                if fs.expected_response:
+                    prompt_parts.append(f"응답: {fs.expected_response}")
+                prompt_parts.append("")
+            prompt_parts.append("---\n")
+
+        # 기본 프롬프트
+        prompt_parts.append(f"사용자: {query}\n응답:")
+
+        prompt = "\n".join(prompt_parts)
+        return await self.generate(prompt)
+
+    def _get_active_fewshots(
+        self,
+        session: Optional[Session],
+        intent_type: Optional[str] = None
+    ) -> List:
+        """Few-shot 예제 가져오기"""
+        if not session:
+            return []
+
+        try:
+            from app.models.few_shot import FewShot
+
+            statement = select(FewShot).where(FewShot.is_active == True)
+            if intent_type:
+                statement = statement.where(FewShot.intent_type == intent_type)
+
+            results = session.exec(statement).all()
+            return list(results)
+        except Exception as e:
+            print(f"Few-shot 조회 실패: {e}")
+            return []
 
 # 싱글톤 인스턴스
 ollama_service = OllamaService()

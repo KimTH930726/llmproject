@@ -101,26 +101,43 @@ PostgreSQL `applicant_info` 테이블:
 **Upload**: Client → Upload API → TextExtractor → Qdrant Service → Embedding Model → Qdrant Vector DB
 
 #### 3. RAG 채팅 (신규)
-**Chat with RAG**:
+**Chat with RAG (Two-tier Intent Classification + Few-shot)**:
 ```
-User Query → ChatAPI → QueryRouter (Intent 분류)
-                           ↓
-        ┌──────────────────┼──────────────────┐
-        ↓                  ↓                  ↓
-   RAG Search         SQL Agent         General Chat
-        ↓                  ↓                  ↓
-   Qdrant Search    Natural Language      Ollama LLM
-        ↓              to SQL                 ↓
-   Top-K Docs            ↓               Direct Answer
-        ↓           PostgreSQL
-   Context Build         ↓
-        ↓           Result Interpretation
-   Ollama LLM            ↓
-        ↓           Natural Language
-   Answer + Sources      ↓
-        └──────────────────┴──────────────────┘
-                           ↓
-                    ChatResponse
+User Query → ChatAPI
+                ↓
+        QueryRouter (Intent 분류)
+                ↓
+    ┌───────────┴──────────┐
+    ↓                      ↓
+1. intents 테이블    2. LLM 분류
+   (keyword 매칭)        (fallback)
+    ↓ priority 순          ↓
+    └───────────┬──────────┘
+                ↓
+         Intent 확정
+                ↓
+        ┌───────┼───────┐
+        ↓       ↓       ↓
+   RAG      SQL    General
+   Search   Agent  Chat
+        ↓       ↓       ↓
+   Few-shot Few-shot Few-shot
+   (rag)    (sql)   (general)
+        ↓       ↓       ↓
+   Qdrant  Natural Ollama
+   Search  Lang    LLM
+        ↓    to SQL    ↓
+   Docs    ↓      Answer
+        ↓  PostgreSQL
+   LLM     ↓
+        ↓  Result
+   Answer  Interpret
+        ↓       ↓
+        └───┬───┘
+            ↓
+      ChatResponse
+            ↓
+    query_logs 저장
 ```
 
 #### 4. Intent & Few-shot Workflow (신규)
@@ -169,14 +186,28 @@ User Query → Check intents table (keyword matching)
 - **Embedding Model**: 한국어 지원 Sentence Transformer (jhgan/ko-sroberta-multitask)
 
 #### Intent & Few-shot Pattern (신규)
-- **Two-tier Intent Classification**:
-  - Tier 1: Keyword-based matching (fast, deterministic, bypasses LLM)
-  - Tier 2: LLM-based classification (fallback for unmatched queries)
-- **Query Logging**: All user queries automatically saved to `query_logs` table
-- **Manual Curation**: Admins review logs and promote valuable queries to few-shots
-- **Active Learning**: Only `is_active=true` few-shots included in prompts
-- **Audit Trail**: PostgreSQL triggers automatically log all few-shot changes to `few_shot_audit`
-- **Bidirectional Updates**: Deleting few-shot resets `query_log.is_converted_to_fewshot` flag
+- **Two-tier Intent Classification** ([query_router.py](backend/app/services/query_router.py)):
+  - **Tier 1**: `intents` 테이블에서 키워드 매칭 (priority 순으로 정렬)
+    - 매칭되면 해당 `intent_type` 즉시 반환 (LLM 우회, 빠른 응답)
+    - `_check_intent_table()` 메서드로 구현
+  - **Tier 2**: LLM 기반 분류 (fallback)
+    - intents 테이블에서 매칭 안되면 `classify_intent()` 호출
+    - Ollama LLM으로 질의 내용 분석하여 intent 결정
+- **Query Logging** ([chat.py](backend/app/api/chat.py)):
+  - 모든 사용자 질의를 `query_logs` 테이블에 자동 저장
+  - 저장 내용: `query_text`, `detected_intent`, `response`
+  - 응답 생성 후 저장 (전체 워크플로우 완료 보장)
+- **Few-shot Integration** (모든 의도에 적용):
+  - **RAG Search** ([rag_service.py](backend/app/services/rag_service.py)): `intent_type='rag_search'` few-shots를 프롬프트에 포함
+  - **SQL Agent** ([sql_agent.py](backend/app/services/sql_agent.py)): `intent_type='sql_query'` few-shots를 SQL 생성 및 결과 해석 프롬프트에 포함
+  - **General Chat** ([ollama_service.py](backend/app/services/ollama_service.py)): `intent_type='general'` few-shots를 대화 프롬프트에 포함
+  - 각 서비스는 `_get_active_fewshots()` 메서드로 `is_active=true` few-shots만 조회
+- **Manual Curation**:
+  - Admin이 관리 UI에서 query_logs 검토
+  - 가치있는 질의를 "승격" 버튼으로 few_shots 테이블로 변환
+- **Active Learning**: `is_active=true` few-shots만 프롬프트에 포함
+- **Audit Trail**: PostgreSQL 트리거로 `few_shot_audit` 테이블에 모든 변경 이력 자동 기록
+- **Bidirectional Updates**: Few-shot 삭제 시 `query_log.is_converted_to_fewshot` 플래그 자동 리셋
 
 #### Dependency Injection
 - SQLModel `Session` is injected via FastAPI's `Depends(get_session)`

@@ -38,13 +38,13 @@ async def chat(
     intent_value = None
 
     try:
-        # 1. 의도 분류 (간단한 규칙 기반 사용, LLM 기반으로 변경 가능)
-        intent = await query_router.classify_intent_simple(query)
+        # 1. 의도 분류 (intents 테이블 우선, 없으면 LLM으로 분류)
+        intent = await query_router.classify_intent_simple(query, session=session)
         intent_value = intent.value
 
-        # 2. 의도별 처리
+        # 2. 의도별 처리 (모든 서비스에 session 전달하여 Few-shot 예제 활용)
         if intent == QueryIntent.RAG_SEARCH:
-            # RAG 검색 (session 전달하여 Few-shot 예제 활용)
+            # RAG 검색
             result = await rag_service.answer_question(query, top_k=3, session=session)
             answer = result["answer"]
             response = ChatResponse(
@@ -54,8 +54,8 @@ async def chat(
             )
 
         elif intent == QueryIntent.SQL_QUERY:
-            # SQL Agent 실행
-            result = await sql_agent.execute_query(query, session)
+            # SQL Agent 실행 (Few-shot 포함)
+            result = await sql_agent.execute_query(query, session=session)
             answer = result["answer"]
             response = ChatResponse(
                 answer=answer,
@@ -65,8 +65,8 @@ async def chat(
             )
 
         else:  # QueryIntent.GENERAL
-            # 일반 대화
-            answer = await ollama_service.generate(query)
+            # 일반 대화 (Few-shot 포함)
+            answer = await ollama_service.generate_with_fewshot(query, session=session, intent_type="general")
             response = ChatResponse(
                 answer=answer,
                 intent=intent_value
@@ -88,14 +88,14 @@ async def chat(
 
 
 @router.post("/classify")
-async def classify_query(request: ChatRequest):
+async def classify_query(request: ChatRequest, session: Session = Depends(get_session)):
     """
     질의 의도 분류만 수행 (디버깅용)
 
     - query: 사용자 질의
     """
     try:
-        intent_simple = await query_router.classify_intent_simple(request.query)
+        intent_simple = await query_router.classify_intent_simple(request.query, session=session)
         intent_llm = await query_router.classify_intent(request.query)
 
         return {

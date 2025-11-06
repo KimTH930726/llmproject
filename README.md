@@ -4,20 +4,32 @@ PostgreSQL에 저장된 채용 지원자의 자기소개서를 LLM으로 자동 
 
 ## 주요 기능
 
+### 지원자 분석
 - **자기소개서 요약**: Ollama LLM을 사용하여 지원 동기, 경력, 기술을 종합 요약 (3-5개 핵심 문장)
 - **키워드 추출**: 지원자 정보에서 중요한 키워드 5-10개 자동 추출
 - **면접 예상 질문**: 지원자 정보 기반 면접 예상 질문 10개 자동 생성
-- **RESTful API**: FastAPI 기반의 표준화된 API
 
-> **중요**: 이 시스템은 **분석 전용**입니다. 지원자 데이터는 PostgreSQL에 이미 존재한다고 가정하며, CRUD 기능은 제공하지 않습니다.
+### RAG 기반 문서 검색
+- **문서 업로드**: PDF, DOCX, TXT, XLSX 파일 업로드 및 Qdrant 벡터 DB 저장
+- **RAG 검색**: 업로드된 문서에서 관련 정보를 검색하여 LLM으로 답변 생성
+- **자연어 SQL**: 자연어 질의를 SQL로 변환하여 데이터베이스 조회
+
+### 지능형 Intent & Few-shot 학습
+- **Two-tier Intent 분류**: 키워드 매칭 → LLM 분류 (빠르고 정확)
+- **Query Logging**: 모든 사용자 질의 자동 저장 및 추적
+- **Few-shot Learning**: 질의 로그를 Few-shot 예제로 승격하여 LLM 프롬프트에 활용
+
+> **중요**: 이 시스템은 **폐쇄망 서버 배포**를 위해 설계되었습니다. PostgreSQL, Ollama, Qdrant는 서버에 이미 실행 중이어야 합니다.
 
 ## 기술 스택
 
 ### Backend
 - **FastAPI** - Python 비동기 웹 프레임워크
 - **SQLModel** - SQLAlchemy + Pydantic ORM
-- **PostgreSQL 16** - 데이터베이스
+- **PostgreSQL 16** - 지원자 정보 저장 + Query Logging
 - **Ollama** - LLM 서비스 (llama3.2:1b)
+- **Qdrant** - 벡터 데이터베이스 (문서 임베딩)
+- **Sentence Transformers** - 한국어 임베딩 (jhgan/ko-sroberta-multitask)
 - **httpx** - 비동기 HTTP 클라이언트
 
 ### Frontend
