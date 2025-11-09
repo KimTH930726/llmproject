@@ -113,6 +113,79 @@ class QdrantService:
         collection_info = self.client.get_collection(self.collection_name)
         return collection_info.points_count
 
+    def get_all_documents(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """
+        저장된 모든 문서 조회 (페이징 지원)
+
+        Args:
+            limit: 반환할 최대 문서 수
+            offset: 건너뛸 문서 수
+
+        Returns:
+            문서 리스트 (각 문서는 id, text, metadata 포함)
+        """
+        # Qdrant scroll API로 문서 조회
+        scroll_result = self.client.scroll(
+            collection_name=self.collection_name,
+            limit=limit,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False  # 벡터는 불필요 (용량 절약)
+        )
+
+        documents = []
+        for point in scroll_result[0]:  # scroll_result는 (points, next_offset) 튜플
+            doc = {
+                "id": str(point.id),
+                "text": point.payload.get("text", ""),
+                "metadata": {k: v for k, v in point.payload.items() if k != "text"}
+            }
+            documents.append(doc)
+
+        return documents
+
+    def get_document_by_id(self, doc_id: str) -> Dict[str, Any]:
+        """
+        특정 문서 조회
+
+        Args:
+            doc_id: 문서 ID
+
+        Returns:
+            문서 정보 (id, text, metadata)
+        """
+        points = self.client.retrieve(
+            collection_name=self.collection_name,
+            ids=[doc_id],
+            with_payload=True,
+            with_vectors=False
+        )
+
+        if not points:
+            return None
+
+        point = points[0]
+        return {
+            "id": str(point.id),
+            "text": point.payload.get("text", ""),
+            "metadata": {k: v for k, v in point.payload.items() if k != "text"}
+        }
+
+    def get_collection_info(self) -> Dict[str, Any]:
+        """
+        컬렉션 정보 조회
+
+        Returns:
+            컬렉션 통계 정보
+        """
+        collection_info = self.client.get_collection(self.collection_name)
+        return {
+            "name": self.collection_name,
+            "points_count": collection_info.points_count,
+            "vector_size": collection_info.config.params.vectors.size,
+            "distance": collection_info.config.params.vectors.distance.name
+        }
+
 
 # 싱글톤 인스턴스
 qdrant_service = QdrantService()

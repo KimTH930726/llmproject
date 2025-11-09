@@ -2,12 +2,13 @@ import { useState } from 'react';
 import IntentManagement from './components/IntentManagement';
 import QueryLogManagement from './components/QueryLogManagement';
 import FewShotManagement from './components/FewShotManagement';
+import Dashboard from './components/Dashboard';
 import './App.css';
 
-type TabType = 'intent' | 'querylog' | 'fewshot';
+type TabType = 'dashboard' | 'intent' | 'querylog' | 'fewshot';
 
 function App() {
-  const [activeTab, setActiveTab] = useState<TabType>('intent');
+  const [activeTab, setActiveTab] = useState<TabType>('dashboard');
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -39,6 +40,16 @@ function App() {
       <div className="max-w-7xl mx-auto px-6 py-6">
         <div className="bg-white rounded-xl shadow-sm border border-gray-200">
           <div className="flex gap-1 p-1 border-b border-gray-200">
+            <button
+              onClick={() => setActiveTab('dashboard')}
+              className={`flex-1 px-4 py-3 font-medium text-sm rounded-lg transition-all duration-200 ${
+                activeTab === 'dashboard'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+              }`}
+            >
+              대시보드
+            </button>
             <button
               onClick={() => setActiveTab('intent')}
               className={`flex-1 px-4 py-3 font-medium text-sm rounded-lg transition-all duration-200 ${
@@ -73,6 +84,7 @@ function App() {
 
           {/* Content Area */}
           <div className="p-6">
+            {activeTab === 'dashboard' && <Dashboard />}
             {activeTab === 'intent' && <IntentManagement />}
             {activeTab === 'fewshot' && <FewShotManagement />}
             {activeTab === 'querylog' && <QueryLogManagement />}

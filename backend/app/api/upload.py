@@ -63,12 +63,68 @@ async def upload_document(file: UploadFile = File(...)):
 
 @router.get("/stats")
 async def get_upload_stats():
-    """업로드된 문서 통계"""
+    """업로드된 문서 통계 및 컬렉션 정보"""
     try:
-        count = qdrant_service.count_documents()
-        return {
-            "total_documents": count,
-            "collection_name": qdrant_service.collection_name
-        }
+        collection_info = qdrant_service.get_collection_info()
+        return collection_info
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"통계 조회 실패: {str(e)}")
+
+
+@router.get("/documents")
+async def get_documents(
+    limit: int = 100,
+    offset: int = 0
+):
+    """
+    저장된 문서 목록 조회
+
+    - limit: 반환할 최대 문서 수 (기본 100)
+    - offset: 건너뛸 문서 수 (페이징용)
+    """
+    try:
+        documents = qdrant_service.get_all_documents(limit=limit, offset=offset)
+        total = qdrant_service.count_documents()
+        return {
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "documents": documents
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"문서 조회 실패: {str(e)}")
+
+
+@router.get("/documents/{doc_id}")
+async def get_document(doc_id: str):
+    """특정 문서 상세 조회"""
+    try:
+        document = qdrant_service.get_document_by_id(doc_id)
+        if not document:
+            raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다")
+        return document
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"문서 조회 실패: {str(e)}")
+
+
+@router.delete("/documents/{doc_id}")
+async def delete_document(doc_id: str):
+    """문서 삭제"""
+    try:
+        # 문서 존재 확인
+        document = qdrant_service.get_document_by_id(doc_id)
+        if not document:
+            raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다")
+
+        # 삭제
+        qdrant_service.delete_document(doc_id)
+        return {
+            "message": "문서가 성공적으로 삭제되었습니다",
+            "doc_id": doc_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"문서 삭제 실패: {str(e)}")
