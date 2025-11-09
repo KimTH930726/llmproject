@@ -6,7 +6,7 @@ import os
 from typing import List, Dict, Any
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -18,14 +18,15 @@ class QdrantService:
     def __init__(self):
         self.qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
         self.collection_name = os.getenv("QDRANT_COLLECTION_NAME", "documents")
-        self.embedding_model_name = os.getenv("EMBEDDING_MODEL", "jhgan/ko-sroberta-multitask")
+        # FastEmbed 다국어 모델 (한국어 포함)
+        self.embedding_model_name = os.getenv("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-mpnet-base-v2")
 
         # Qdrant 클라이언트 초기화
         self.client = QdrantClient(url=self.qdrant_url)
 
-        # 임베딩 모델 로드 (한국어 지원 모델)
-        self.embedding_model = SentenceTransformer(self.embedding_model_name)
-        self.vector_size = self.embedding_model.get_sentence_embedding_dimension()
+        # FastEmbed 임베딩 모델 로드 (경량, 다국어 지원)
+        self.embedding_model = TextEmbedding(model_name=self.embedding_model_name)
+        self.vector_size = 768  # paraphrase-multilingual-mpnet-base-v2 벡터 크기
 
         # 컬렉션 생성 (없는 경우)
         self._ensure_collection()
@@ -50,8 +51,9 @@ class QdrantService:
             text: 문서 텍스트
             metadata: 추가 메타데이터 (파일명, 업로드 시간 등)
         """
-        # 텍스트를 임베딩 벡터로 변환
-        vector = self.embedding_model.encode(text).tolist()
+        # 텍스트를 임베딩 벡터로 변환 (FastEmbed은 generator 반환)
+        embeddings = list(self.embedding_model.embed([text]))
+        vector = embeddings[0].tolist()
 
         # 메타데이터 기본값 설정
         payload = metadata or {}
@@ -80,8 +82,9 @@ class QdrantService:
         Returns:
             검색 결과 리스트 (각 결과는 text, score, metadata 포함)
         """
-        # 쿼리를 임베딩 벡터로 변환
-        query_vector = self.embedding_model.encode(query).tolist()
+        # 쿼리를 임베딩 벡터로 변환 (FastEmbed)
+        embeddings = list(self.embedding_model.embed([query]))
+        query_vector = embeddings[0].tolist()
 
         # Qdrant에서 유사 문서 검색
         search_result = self.client.search(

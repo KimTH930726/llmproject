@@ -67,119 +67,106 @@ npm run dev
 
 **전제 조건 (폐쇄망 서버에 이미 실행 중):**
 - Docker & Docker Compose
-- PostgreSQL 컨테이너 (applicant_info, intents, query_logs, few_shots, few_shot_audit 테이블 생성 완료)
-- Ollama 컨테이너 (llama3.2:1b 모델 포함)
-- Qdrant 컨테이너
+- PostgreSQL (applicant_info, intents, query_logs, few_shots, few_shot_audit 테이블)
+- Ollama (llama3.2:1b 모델)
+- Qdrant
 
-#### 방식 비교
+**임베딩 모델 개선 (2024-11-09):**
+- ❌ 이전: sentence-transformers → 7.97GB
+- ✅ 현재: FastEmbed (ONNX Runtime) → 778MB (**90% 감소!**)
+- 다국어 모델: `paraphrase-multilingual-mpnet-base-v2` (한국어 포함, 768차원)
 
-| 방식 | 압축 크기 | 폐쇄망 작업 | 장점 | 단점 |
-|------|----------|-----------|------|------|
-| **A. 로컬 빌드 후 이미지 전송** ⭐ | ~700MB | 이미지 로드만 | 파일 작음, 빠름 | 로컬 빌드 필요 |
-| B. 베이스 이미지 + 패키지 전송 | ~4.2GB | 폐쇄망에서 빌드 | 의존성 명확 | 파일 큼, 느림 |
+#### 배포 방식
 
-**권장: 방식 A (로컬 빌드 후 전송)** - 파일 크기 83% 감소
+| 방식 | 파일 크기 | 폐쇄망 작업 | 권장 상황 |
+|------|----------|-----------|---------|
+| **A. 빌드 이미지 전송** | **870MB** | 이미지 로드만 | 일반적인 경우 (빠름) |
+| B. 베이스+패키지 전송 | 825MB | 빌드 5-10분 | 디버깅/보안검증 필요 시 |
 
 ---
 
-#### 방식 A: 로컬 빌드 후 이미지 전송 (권장)
+#### 방식 A: 빌드 이미지 전송 (권장)
 
-##### 1. 인터넷 환경에서 빌드
+##### 1단계: 인터넷 환경에서 준비
 ```bash
-# 프로젝트 루트에서 실행
+cd /path/to/llmproject
 
-# 1-1. Linux AMD64용 이미지 빌드 (맥/윈도우에서도 필수!)
-# Backend 이미지
+# Linux AMD64용 빌드 (맥/윈도우도 --platform 필수)
 docker build --platform linux/amd64 -t llmproject-backend:latest -f backend/Dockerfile backend/
-
-# Frontend 이미지
 docker build --platform linux/amd64 -t llmproject-frontend:latest -f frontend/Dockerfile frontend/
 
-# 1-2. 빌드된 이미지 저장
-docker save -o llmproject-backend.tar llmproject-backend:latest
-docker save -o llmproject-frontend.tar llmproject-frontend:latest
+# 이미지 저장
+docker save -o llmproject-backend.tar llmproject-backend:latest    # 767MB
+docker save -o llmproject-frontend.tar llmproject-frontend:latest  # 50MB
 
-# 1-3. 프로젝트 파일만 압축 (Docker 이미지 제외)
+# 프로젝트 코드 압축
 cd ..
 tar -czf llmproject-code.tar.gz \
   --exclude='llmproject/node_modules' \
   --exclude='llmproject/backend/__pycache__' \
-  --exclude='llmproject/backend/app/__pycache__' \
   --exclude='llmproject/frontend/dist' \
-  --exclude='llmproject/frontend/node_modules' \
   --exclude='llmproject/*.tar' \
-  --exclude='llmproject/python-packages' \
-  llmproject/
+  llmproject/                                                        # 50MB
 
-# 결과물:
-# - llmproject-backend.tar (~500MB)
-# - llmproject-frontend.tar (~150MB)
-# - llmproject-code.tar.gz (~50MB)
-# 총합: ~700MB (기존 4.2GB 대비 83% 감소)
+# 총 3개 파일 ~870MB
 ```
 
-##### 2. 폐쇄망 서버로 전송
-```bash
-# USB, 내부망 전송 등으로 3개 파일 복사
-# - llmproject-backend.tar
-# - llmproject-frontend.tar
-# - llmproject-code.tar.gz
-```
+##### 2단계: 폐쇄망 서버로 전송
+USB나 내부망으로 3개 파일 복사
 
-##### 3. 폐쇄망 서버에서 배포
+##### 3단계: 폐쇄망 서버에서 배포
 ```bash
-# 3-1. Docker 이미지 로드
+# 이미지 로드
 docker load -i llmproject-backend.tar
 docker load -i llmproject-frontend.tar
 
-# 3-2. 프로젝트 코드 압축 해제
+# 프로젝트 압축 해제
 tar -xzf llmproject-code.tar.gz
 cd llmproject
 
-# 3-3. 환경 변수 설정
-cd backend
-cp .env.example .env
-vi .env
+# 환경 변수 설정 (기존 서비스 연결)
+cat > backend/.env << 'EOF'
+DATABASE_URL=postgresql://admin:admin123@postgres-container:5432/applicants_db
+OLLAMA_BASE_URL=http://ollama-container:11434
+OLLAMA_MODEL=llama3.2:1b
+QDRANT_URL=http://qdrant-container:6333
+EOF
 
-# .env 파일에서 수정할 내용:
-# OLLAMA_BASE_URL=http://ollama-container-name:11434
-# DATABASE_URL=postgresql://admin:admin123@postgres-container-name:5432/applicants_db
-# QDRANT_URL=http://qdrant-container-name:6333
+# docker-compose.yml 수정 (build → image)
+# vi docker-compose.yml에서 다음과 같이 수정:
+#
+# backend:
+#   image: llmproject-backend:latest  # 추가
+#   # build: ...  # 주석 처리
+#
+# frontend:
+#   image: llmproject-frontend:latest  # 추가
+#   # build: ...  # 주석 처리
 
-# 3-4. docker-compose.yml 수정 (빌드 → 이미지 사용)
-cd ..
-vi docker-compose.yml
-
-# backend와 frontend 서비스에서:
-# build: ./backend  →  image: llmproject-backend:latest
-# build: ./frontend  →  image: llmproject-frontend:latest
-
-# 3-5. 실행
+# 실행
 docker-compose up -d
 
-# 3-6. 로그 확인
+# 확인
 docker-compose logs -f backend
+curl http://localhost:8000/docs  # Backend API
+curl http://localhost/           # Frontend
 ```
 
 ---
 
-#### 방식 B: 베이스 이미지 + 패키지 전송 (용량 큼)
+#### 방식 B: 베이스+패키지 전송 (디버깅용)
 
-##### 1. 인터넷 환경에서 준비
+##### 1단계: 인터넷 환경에서 준비
 ```bash
-# 프로젝트 루트에서 실행
+cd /path/to/llmproject
 
-# 1-1. Docker 베이스 이미지 다운로드 (Linux AMD64용)
+# 베이스 이미지 다운로드
 docker pull --platform linux/amd64 python:3.11-slim
-docker save -o python-3.11-slim.tar python:3.11-slim
-
-docker pull --platform linux/amd64 node:20-alpine
-docker save -o node-20-alpine.tar node:20-alpine
-
 docker pull --platform linux/amd64 nginx:alpine
+docker save -o python-3.11-slim.tar python:3.11-slim
 docker save -o nginx-alpine.tar nginx:alpine
 
-# 1-2. Python 패키지 다운로드 (Linux용)
+# Python 패키지 다운로드
 mkdir -p python-packages
 docker run --rm --platform linux/amd64 \
   -v $(pwd)/backend:/workspace/backend \
@@ -188,146 +175,89 @@ docker run --rm --platform linux/amd64 \
   python:3.11-slim \
   pip download -r requirements.txt -d /workspace/python-packages/
 
-# 1-3. 전체 압축 (프로젝트 상위 디렉토리에서)
+# 압축
 cd ..
-tar -czf llmproject.tar.gz llmproject/
-
-# 결과물: llmproject.tar.gz (~4.2GB)
+tar -czf llmproject-full.tar.gz llmproject/  # ~825MB (python-packages 압축)
 ```
 
-##### 2. 폐쇄망 서버로 전송
-```bash
-# USB, 내부망 전송 등을 통해 llmproject.tar.gz를 서버로 복사
-scp llmproject.tar.gz user@server:/path/to/destination/
-```
+##### 2단계: 폐쇄망 서버로 전송
+USB나 내부망으로 llmproject-full.tar.gz 복사
 
-##### 3. 폐쇄망 서버에서 배포
+##### 3단계: 폐쇄망 서버에서 배포
 ```bash
-# 3-1. 압축 해제
-tar -xzf llmproject.tar.gz
+# 압축 해제
+tar -xzf llmproject-full.tar.gz
 cd llmproject
 
-# 3-2. Docker 베이스 이미지 로드
+# 베이스 이미지 로드
 docker load -i python-3.11-slim.tar
-docker load -i node-20-alpine.tar
 docker load -i nginx-alpine.tar
 
-# 3-3. 환경 변수 설정
-cd backend
-cp .env.example .env
-vi .env
+# 환경 변수 설정
+cat > backend/.env << 'EOF'
+DATABASE_URL=postgresql://admin:admin123@postgres-container:5432/applicants_db
+OLLAMA_BASE_URL=http://ollama-container:11434
+OLLAMA_MODEL=llama3.2:1b
+QDRANT_URL=http://qdrant-container:6333
+EOF
 
-# .env 파일에서 수정할 내용:
-# OLLAMA_BASE_URL=http://ollama-container-name:11434  (서버의 Ollama 컨테이너)
-# DATABASE_URL=postgresql://admin:admin123@postgres-container-name:5432/applicants_db
-# QDRANT_URL=http://qdrant-container-name:6333
-
-# 3-4. Docker 네트워크 확인 (기존 PostgreSQL/Ollama/Qdrant와 같은 네트워크 사용)
-docker network ls
-# backend/frontend를 기존 네트워크에 연결하거나, docker-compose.yml에서 external 네트워크 설정
-
-# 3-5. 빌드 및 실행
-cd ..
+# 빌드 및 실행 (폐쇄망에서 python-packages로 설치)
 docker-compose up -d --build
 
-# 3-6. 로그 확인
+# 확인
 docker-compose logs -f backend
-docker-compose logs -f frontend
-
-# 3-7. 접속 확인
-curl http://localhost:8000/docs  # Backend API
-curl http://localhost/           # Frontend
 ```
 
 ---
 
-#### 공통: 네트워크 연결 (기존 컨테이너와 통신)
+#### 네트워크 연결 (기존 서비스와 통신)
 
+docker-compose.yml의 networks 설정:
+```yaml
+networks:
+  app-network:
+    external: true  # 기존 네트워크 사용
+    name: existing-network-name
+```
+
+또는 컨테이너 시작 후 연결:
 ```bash
-# 기존 PostgreSQL/Ollama/Qdrant가 다른 네트워크에 있는 경우
 docker network connect existing-network backend
 docker network connect existing-network frontend
-
-# 또는 .env에서 IP 주소 직접 사용
-# OLLAMA_BASE_URL=http://172.17.0.1:11434
-# DATABASE_URL=postgresql://admin:admin123@172.17.0.1:5432/applicants_db
 ```
 
 ---
 
-#### 파일 크기 실측 비교
+#### 배포 체크리스트
 
-```bash
-# 방식 A (로컬 빌드)
-llmproject-backend.tar      ~500MB
-llmproject-frontend.tar     ~150MB
-llmproject-code.tar.gz       ~50MB
---------------------------------
-총합:                       ~700MB ⭐
-
-# 방식 B (베이스 이미지 + 패키지)
-python-3.11-slim.tar        123MB
-node-20-alpine.tar          131MB
-nginx-alpine.tar             52MB
-python-packages/            3.9GB
-프로젝트 코드                ~50MB
---------------------------------
-총합:                       ~4.2GB
-```
-
-**권장 상황별 선택:**
-- **일반적인 경우**: 방식 A (파일 크기 최소화)
-- **디버깅 필요**: 방식 B (폐쇄망에서 재빌드 가능)
-- **보안 검증 필요**: 방식 B (모든 의존성 소스 확인 가능)
-
----
-
-#### 폐쇄망 배포 체크리스트
-
-**배포 전 준비:**
-- [ ] PostgreSQL 컨테이너 실행 중 확인
-- [ ] Ollama 컨테이너 + llama3.2:1b 모델 확인
-- [ ] Qdrant 컨테이너 실행 중 확인
-- [ ] 네트워크 이름/IP 주소 파악
-- [ ] 데이터베이스 테이블 생성 완료 (init.sql 실행)
-
-**전송 파일 확인:**
-- 방식 A:
-  - [ ] llmproject-backend.tar
-  - [ ] llmproject-frontend.tar
-  - [ ] llmproject-code.tar.gz
-- 방식 B:
-  - [ ] llmproject.tar.gz (베이스 이미지 + 패키지 포함)
+**사전 확인:**
+- [ ] PostgreSQL, Ollama, Qdrant 실행 중
+- [ ] init.sql로 테이블 생성 완료
+- [ ] 네트워크 이름/컨테이너명 확인
 
 **배포 후 검증:**
-- [ ] Backend API 응답 확인: `curl http://localhost:8000/docs`
-- [ ] Frontend 접속 확인: `curl http://localhost/`
-- [ ] PostgreSQL 연결 확인: `docker logs backend | grep "Database connection"`
-- [ ] Ollama 연결 확인: Backend 로그에서 모델 호출 성공
-- [ ] Qdrant 연결 확인: Dashboard에서 컬렉션 정보 표시
+```bash
+# API 확인
+curl http://localhost:8000/docs
+curl http://localhost/
+
+# 로그 확인 (연결 오류 체크)
+docker logs backend --tail 50
+docker logs frontend --tail 50
+```
 
 **문제 해결:**
 ```bash
-# 컨테이너 상태 확인
-docker ps -a
-
-# 네트워크 연결 확인
+# 네트워크 확인
+docker network ls
 docker network inspect <network-name>
 
-# 로그 확인
-docker logs backend --tail 100
-docker logs frontend --tail 100
+# DB 연결 테스트
+docker exec backend curl http://postgres-container:5432
 
-# 컨테이너 내부 접속
-docker exec -it backend bash
-curl http://postgres:5432  # 연결 테스트
+# 컨테이너 재시작
+docker-compose restart backend
 ```
-
-**중요:**
-- `docker-compose.yml`은 backend/frontend만 포함 (폐쇄망용)
-- PostgreSQL, Ollama, Qdrant는 서버에 이미 실행 중이어야 함
-- 네트워크 연결 또는 IP 주소로 기존 서비스에 접근
-- 상세 가이드: [SETUP-GUIDE.md](SETUP-GUIDE.md)
 
 ## Architecture
 

@@ -1,94 +1,87 @@
-# 임베딩 모델 및 벡터 DB 설정 변경 가이드
+# 임베딩 모델 가이드 (FastEmbed)
 
 ## 개요
 
-이 문서는 RAG 시스템에서 사용하는 임베딩 모델과 Qdrant 벡터 DB 설정을 변경하는 방법을 설명합니다.
+**현재 시스템**: FastEmbed (Qdrant 경량 임베딩 라이브러리)
+- ONNX Runtime 기반 (PyTorch 불필요)
+- Backend 이미지 크기: 778MB (sentence-transformers 7.97GB 대비 90% 감소)
+- 기본 모델: `paraphrase-multilingual-mpnet-base-v2` (768차원, 다국어)
 
 ---
 
-## 임베딩 모델 변경
+## 지원 모델 목록
 
-### 1. 사용 가능한 한국어 임베딩 모델
+### FastEmbed 다국어 모델
 
-#### 권장 모델 (Sentence Transformers)
+| 모델 이름 | 벡터 차원 | 언어 지원 | 용도 |
+|----------|----------|---------|------|
+| `paraphrase-multilingual-mpnet-base-v2` | 768 | **기본 설정**, 한국어 포함 | 범용 |
+| `paraphrase-multilingual-MiniLM-L6-v2` | 384 | 한국어 포함, 경량 | 빠른 처리 |
+| `intfloat/multilingual-e5-large` | 1024 | 한국어 포함, 고성능 | 정확도 우선 |
 
-| 모델 이름 | 벡터 차원 | 특징 | 용도 |
-|----------|----------|------|------|
-| `jhgan/ko-sroberta-multitask` | 768 | 기본 설정, 범용 | 일반 문서 검색 |
-| `BM-K/KoSimCSE-roberta` | 768 | 의미 유사도 특화 | 의미 검색 중심 |
-| `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | 384 | 다국어 지원, 경량 | 빠른 처리 필요 시 |
-| `sentence-transformers/paraphrase-multilingual-mpnet-base-v2` | 768 | 다국어 지원, 고성능 | 정확도 우선 |
-| `intfloat/multilingual-e5-large` | 1024 | 최신 모델, 고성능 | 최고 정확도 필요 시 |
+**참고**: FastEmbed는 한국어 전용 모델은 지원하지 않지만, 다국어 모델이 한국어를 포함합니다.
 
-### 2. 모델 변경 방법
+---
 
-#### Step 1: 환경 변수 수정
+## 모델 변경 방법
 
-`backend/.env` 파일에서 모델 이름 변경:
+### 1단계: 환경 변수 수정
 
+`backend/.env`:
 ```bash
-# 기존 (기본값)
-EMBEDDING_MODEL=jhgan/ko-sroberta-multitask
+# 기본 (현재 설정)
+EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-mpnet-base-v2
 
-# 변경 예시 1: 경량 모델로 변경
-EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+# 경량 모델 (384차원)
+EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L6-v2
 
-# 변경 예시 2: 고성능 모델로 변경
+# 고성능 모델 (1024차원)
 EMBEDDING_MODEL=intfloat/multilingual-e5-large
 ```
 
-#### Step 2: Qdrant 컬렉션 재생성
+### 2단계: qdrant_service.py 수정
 
-**중요**: 모델을 변경하면 벡터 차원이 달라지므로 기존 컬렉션을 삭제하고 재생성해야 합니다.
+모델 변경 시 벡터 크기도 수정 필요:
+```python
+# backend/app/services/qdrant_service.py
 
-```bash
-# 방법 1: Backend 재시작 (자동 재생성)
-docker-compose restart backend
-
-# 방법 2: Qdrant 컬렉션 수동 삭제
-curl -X DELETE http://localhost:6333/collections/documents
+self.vector_size = 768   # mpnet-base-v2
+# self.vector_size = 384  # MiniLM-L6-v2
+# self.vector_size = 1024 # e5-large
 ```
 
-#### Step 3: 기존 문서 재업로드
+### 3단계: 컬렉션 재생성
 
-모델 변경 후에는 **모든 문서를 다시 업로드**해야 합니다.
-
+**벡터 차원이 변경되면 기존 컬렉션 삭제 필수**:
 ```bash
-# 예시: 모든 문서 재업로드
-for file in documents/*.pdf; do
-  curl -X POST http://localhost:8000/api/upload/ \
-    -F "file=@$file"
-done
+# Qdrant 컬렉션 삭제
+curl -X DELETE http://localhost:6333/collections/documents
+
+# Backend 재시작 (컬렉션 자동 생성)
+docker-compose restart backend
+
+# 기존 문서 재업로드 필요
 ```
 
 ---
 
-## 벡터 차원 확인 방법
+## 벡터 차원 확인
 
-### Python에서 확인
-
-```python
-from sentence_transformers import SentenceTransformer
-
-model = SentenceTransformer('jhgan/ko-sroberta-multitask')
-dimension = model.get_sentence_embedding_dimension()
-print(f"Vector dimension: {dimension}")  # 출력: 768
+### Backend API 사용
+```bash
+curl http://localhost:8000/api/upload/stats
 ```
 
-### 현재 Qdrant 컬렉션 설정 확인
-
+### Qdrant API 사용
 ```bash
 curl http://localhost:6333/collections/documents
 ```
 
-**응답 예시**:
+응답 예시:
 ```json
 {
   "result": {
-    "vectors": {
-      "size": 768,
-      "distance": "Cosine"
-    }
+    "vectors": {"size": 768, "distance": "Cosine"}
   }
 }
 ```
