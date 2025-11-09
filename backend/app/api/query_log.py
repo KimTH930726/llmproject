@@ -100,7 +100,17 @@ async def convert_to_fewshot(
     if query_log.is_converted_to_fewshot:
         raise HTTPException(status_code=400, detail="Already converted to few-shot")
 
-    # 3. Few-shot 생성
+    # 3. 동일한 질의 텍스트가 이미 Few-shot에 존재하는지 확인
+    existing_fewshot = session.exec(
+        select(FewShot).where(FewShot.user_query == query_log.query_text)
+    ).first()
+    if existing_fewshot:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Few-shot with same query already exists (ID: {existing_fewshot.id})"
+        )
+
+    # 4. Few-shot 생성
     few_shot = FewShot(
         source_query_log_id=data.query_log_id,
         intent_type=data.intent_type or query_log.detected_intent,
@@ -110,7 +120,7 @@ async def convert_to_fewshot(
     )
     session.add(few_shot)
 
-    # 4. Query log 업데이트
+    # 5. Query log 업데이트
     query_log.is_converted_to_fewshot = True
     session.add(query_log)
 

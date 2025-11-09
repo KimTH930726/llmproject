@@ -10,81 +10,81 @@ function App() {
   const [activeTab, setActiveTab] = useState<TabType>('intent');
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-blue-100">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-gradient-to-r from-blue-600 via-blue-700 to-indigo-700 shadow-xl">
-        <div className="max-w-7xl mx-auto px-4 py-8">
-          <div className="flex items-center gap-4">
-            <div className="w-16 h-16 bg-white rounded-xl flex items-center justify-center shadow-lg">
-              <span className="text-4xl">🤖</span>
+      <header className="bg-white border-b border-gray-200 shadow-sm">
+        <div className="max-w-7xl mx-auto px-6 py-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center shadow-sm">
+                <span className="text-2xl">💼</span>
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">
+                  지원자 검색 시스템
+                </h1>
+                <p className="text-gray-600 text-sm mt-0.5">
+                  AI 기반 의미검색으로 최적의 후보를 찾아보세요
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-4xl font-bold text-white drop-shadow-md">
-                LLM 관리 시스템
-              </h1>
-              <p className="text-blue-100 mt-2">
-                Intent 및 Few-shot 예제를 관리하여 AI 성능을 향상시키세요
-              </p>
+            <div className="text-sm text-gray-500">
+              API: /api
             </div>
           </div>
         </div>
       </header>
 
       {/* Navigation Tabs */}
-      <div className="max-w-7xl mx-auto px-4 py-6">
-        <div className="bg-white rounded-2xl shadow-xl border-2 border-blue-100">
-          <div className="flex gap-2 p-2 bg-blue-50 rounded-t-2xl border-b-2 border-blue-200">
+      <div className="max-w-7xl mx-auto px-6 py-6">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+          <div className="flex gap-1 p-1 border-b border-gray-200">
             <button
               onClick={() => setActiveTab('intent')}
-              className={`flex-1 px-6 py-4 font-bold text-lg rounded-xl transition-all duration-200 ${
+              className={`flex-1 px-4 py-3 font-medium text-sm rounded-lg transition-all duration-200 ${
                 activeTab === 'intent'
-                  ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg scale-105'
-                  : 'text-blue-600 hover:bg-blue-100 hover:scale-102'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
               }`}
             >
-              🎯 Intent 관리
-            </button>
-            <button
-              onClick={() => setActiveTab('querylog')}
-              className={`flex-1 px-6 py-4 font-bold text-lg rounded-xl transition-all duration-200 ${
-                activeTab === 'querylog'
-                  ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg scale-105'
-                  : 'text-blue-600 hover:bg-blue-100 hover:scale-102'
-              }`}
-            >
-              💬 질의 로그
+              Intent 관리
             </button>
             <button
               onClick={() => setActiveTab('fewshot')}
-              className={`flex-1 px-6 py-4 font-bold text-lg rounded-xl transition-all duration-200 ${
+              className={`flex-1 px-4 py-3 font-medium text-sm rounded-lg transition-all duration-200 ${
                 activeTab === 'fewshot'
-                  ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg scale-105'
-                  : 'text-blue-600 hover:bg-blue-100 hover:scale-102'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
               }`}
             >
-              📚 Few-shot 예제
+              Few-shot 관리
+            </button>
+            <button
+              onClick={() => setActiveTab('querylog')}
+              className={`flex-1 px-4 py-3 font-medium text-sm rounded-lg transition-all duration-200 ${
+                activeTab === 'querylog'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+              }`}
+            >
+              질의 로그 관리
             </button>
           </div>
 
           {/* Content Area */}
-          <div className="p-8">
+          <div className="p-6">
             {activeTab === 'intent' && <IntentManagement />}
-            {activeTab === 'querylog' && <QueryLogManagement />}
             {activeTab === 'fewshot' && <FewShotManagement />}
+            {activeTab === 'querylog' && <QueryLogManagement />}
           </div>
         </div>
       </div>
 
       {/* Footer */}
-      <footer className="max-w-7xl mx-auto px-4 py-8 text-center">
-        <div className="bg-white rounded-xl shadow-md p-4 border border-blue-200">
-          <p className="text-blue-800 font-semibold">
-            ✨ 지원자 자기소개서 분석 및 RAG 채팅 시스템 v2.0
-          </p>
-          <p className="text-blue-600 text-sm mt-1">
-            Powered by FastAPI + React + PostgreSQL + Qdrant
-          </p>
-        </div>
+      <footer className="max-w-7xl mx-auto px-6 py-6 text-center">
+        <p className="text-sm text-gray-500">
+          52명 등록됨 · 총 <span className="font-semibold text-gray-700">50명</span> 표시
+        </p>
       </footer>
     </div>
   );

@@ -9,6 +9,7 @@ from sqlalchemy import text
 class Intent(SQLModel, table=True):
     """키워드와 의도 타입 매핑 테이블."""
     __tablename__ = "intents"
+    __table_args__ = {"schema": os.getenv("DB_SCHEMA", "public")}
 
     id: Optional[int] = Field(default=None, primary_key=True)
     keyword: str = Field(sa_column=Column(String(200), nullable=False))
@@ -29,6 +30,7 @@ class Intent(SQLModel, table=True):
 class FewShot(SQLModel, table=True):
     """Few-shot 예제 관리 테이블 - 승격된 예제만 저장."""
     __tablename__ = "few_shots"
+    __table_args__ = {"schema": os.getenv("DB_SCHEMA", "public")}
 
     id: Optional[int] = Field(default=None, primary_key=True)
     source_query_log_id: Optional[int] = Field(default=None, sa_column=Column(BigInteger, nullable=True))  # query_logs.id 참조
@@ -50,6 +52,7 @@ class FewShot(SQLModel, table=True):
 class FewShotAudit(SQLModel, table=True):
     """Few-shot 변경 이력 테이블."""
     __tablename__ = "few_shot_audit"
+    __table_args__ = {"schema": os.getenv("DB_SCHEMA", "public")}
 
     id: Optional[int] = Field(default=None, primary_key=True)
     few_shot_id: int = Field(foreign_key="few_shots.id", nullable=False)

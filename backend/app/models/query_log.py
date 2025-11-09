@@ -8,6 +8,7 @@ from sqlalchemy import text
 class QueryLog(SQLModel, table=True):
     """질의 로그 테이블 - 모든 사용자 질의 자동 저장"""
     __tablename__ = "query_logs"
+    __table_args__ = {"schema": os.getenv("DB_SCHEMA", "public")}
 
     id: Optional[int] = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
     query_text: str = Field(sa_column=Column(Text, nullable=False))
