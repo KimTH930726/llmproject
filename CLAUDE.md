@@ -166,6 +166,29 @@ docker network connect existing-network frontend
 
 ## Architecture
 
+### Backend 디렉토리 구조
+```
+backend/app/
+├── api/              # API 엔드포인트
+│   ├── analysis.py   # 지원자 분석 API
+│   ├── chat.py       # RAG 채팅 API (QueryRouter 사용)
+│   ├── upload.py     # 문서 업로드 API
+│   ├── intent.py     # Intent 관리 API
+│   ├── query_log.py  # Query Log 관리 API
+│   └── fewshot.py    # Few-shot 관리 API
+├── models/           # 데이터 모델 (SQLModel)
+│   ├── applicant.py  # ApplicantInfo 모델
+│   └── few_shot.py   # Intent, QueryLog, FewShot, FewShotAudit 모델
+├── services/         # 비즈니스 로직 (싱글톤)
+│   ├── ollama_service.py   # LLM 호출
+│   ├── qdrant_service.py   # 벡터 DB 검색
+│   ├── rag_service.py      # RAG 파이프라인
+│   ├── query_router.py     # Intent 분류 (Two-tier)
+│   └── sql_agent.py        # NL→SQL 변환
+├── database.py       # DB 연결 및 세션 관리
+└── main.py           # FastAPI 앱 및 라우터 등록
+```
+
 ### 시스템 구조
 ```
 ┌─────────────┐
@@ -236,11 +259,29 @@ query_logs 자동 저장 (추후 Few-shot 승격 가능)
 ```
 
 ### 주요 패턴
-1. **Two-tier Intent Classification**: Keyword matching (fast) → LLM (fallback)
-2. **Few-shot Integration**: 모든 서비스가 `_get_active_fewshots()`로 활성 예제 조회하여 프롬프트에 포함
-3. **Query Logging**: 모든 질의 자동 저장 → 관리 UI에서 승격 → Few-shot 테이블
+1. **Two-tier Intent Classification**:
+   - Tier 1: `intents` 테이블 키워드 매칭 (빠름, 결정적)
+     - 1개 매칭 → 즉시 반환
+     - 2+ 매칭 → LLM에 후보 전달하여 disambiguation
+     - 0개 매칭 → LLM fallback
+   - Tier 2: LLM 기반 분류 (느림, 유연함)
+
+2. **Few-shot Integration**: 모든 서비스가 `_get_active_fewshots(session, intent_type="...")`로 활성 예제 조회하여 프롬프트에 포함
+
+3. **Query Logging**: 모든 질의 자동 저장 → 관리 UI에서 검토 → 승격 버튼 → Few-shot 테이블 → 다음 질의에 반영
+
 4. **Dependency Injection**: FastAPI `Depends(get_session)`로 DB 세션 관리
-5. **Singleton Services**: OllamaService, QdrantService 등 싱글톤 인스턴스
+
+5. **Singleton Services**: 모듈 레벨에서 인스턴스화 (예: `ollama_service`, `rag_service`, `query_router`)
+   ```python
+   # services/ollama_service.py
+   ollama_service = OllamaService()  # 싱글톤
+
+   # api/analysis.py
+   from app.services.ollama_service import ollama_service  # import로 재사용
+   ```
+
+6. **Security Pattern**: SQL Agent는 패턴 매칭만 사용 (동적 SQL 실행 금지, SQL injection 방지)
 
 ## Environment Variables
 
@@ -285,13 +326,16 @@ API 문서: http://localhost:8000/docs
 
 ### 코드 변경
 ```bash
-# 의존성 변경 없으면 재시작만
+# Hot reload (docker-compose.dev.yml 사용 시 자동 반영)
+# backend/app/ 디렉토리는 볼륨 마운트되어 있음
+
+# 환경 변수 변경만: 재시작
 docker-compose restart backend
 
-# 의존성 변경 시 재빌드
+# 의존성 변경 (requirements.txt): 재빌드 필요
 docker-compose up -d --build backend
 
-# 단일 파일 빠른 복사
+# 단일 파일 빠른 복사 (볼륨 미사용 시)
 docker cp backend/app/api/analysis.py backend:/app/app/api/
 docker-compose restart backend
 ```
@@ -308,22 +352,87 @@ docker-compose restart backend
 
 ### 새 분석 API
 1. `OllamaService`에 메서드 추가 ([ollama_service.py](backend/app/services/ollama_service.py))
+   ```python
+   async def new_analysis(self, text: str) -> str:
+       prompt = f"Analyze: {text}"
+       return await self.generate(prompt)
+   ```
 2. API 엔드포인트 추가 ([analysis.py](backend/app/api/analysis.py))
-3. `main.py`에 라우터 등록
+   ```python
+   @router.post("/new-analysis/{applicant_id}")
+   async def new_analysis(applicant_id: int, session: Session = Depends(get_session)):
+       applicant = session.get(ApplicantInfo, applicant_id)
+       result = await ollama_service.new_analysis(applicant.reason)
+       return {"result": result}
+   ```
+3. `main.py`에 라우터 등록 (이미 analysis_router가 등록되어 있으면 자동 포함)
 
 ### 새 Intent Type
-1. `intents` 테이블에 키워드/우선순위 추가
-2. `QueryRouter` 업데이트 ([query_router.py](backend/app/services/query_router.py))
-3. 서비스 핸들러 생성 또는 확장
-4. `/api/chat/classify`로 테스트
-5. 관리 UI에서 Few-shot 예제 추가
+1. **관리 UI 또는 SQL로 `intents` 테이블에 추가**
+   ```sql
+   INSERT INTO intents (keyword, intent_type, priority, description)
+   VALUES ('새키워드', 'new_intent', 5, '새로운 의도');
+   ```
+2. **`QueryRouter`의 `QueryIntent` enum 확장** ([query_router.py](backend/app/services/query_router.py))
+   ```python
+   class QueryIntent(str, Enum):
+       RAG_SEARCH = "rag_search"
+       SQL_QUERY = "sql_query"
+       GENERAL = "general"
+       NEW_INTENT = "new_intent"  # 추가
+   ```
+3. **서비스 핸들러 생성** (`backend/app/services/new_service.py`)
+   - `_get_active_fewshots(session, intent_type="new_intent")` 필수 포함
+   - Few-shots를 프롬프트에 주입
+4. **Chat API에서 라우팅 추가** ([chat.py](backend/app/api/chat.py))
+   ```python
+   elif intent == QueryIntent.NEW_INTENT:
+       result = await new_service.handle(query, session)
+   ```
+5. **테스트**: `POST /api/chat/classify {"query": "새키워드 포함 질문"}`
+6. **관리 UI에서 Few-shot 예제 추가** (Query Logs → 승격)
 
 ### 새 RAG 서비스
-1. `backend/app/services/`에 서비스 클래스 생성 (RAG Service 패턴 따름)
-2. `_get_active_fewshots(session, intent_type="your_intent")` 메서드 추가
-3. LLM 프롬프트에 Few-shots 포함
-4. API 엔드포인트 생성 및 라우터 등록
-5. `intents` 테이블에 키워드 추가
+1. **서비스 클래스 생성** (`backend/app/services/new_rag_service.py`)
+   ```python
+   class NewRagService:
+       def __init__(self):
+           self.ollama = ollama_service
+           self.qdrant = qdrant_service
+
+       async def handle(self, query: str, session: Session):
+           # 1. Few-shots 조회
+           few_shots = self._get_active_fewshots(session, "new_rag")
+
+           # 2. Qdrant 검색 또는 다른 로직
+           results = self.qdrant.search(query)
+
+           # 3. 프롬프트 생성 (Few-shots 포함)
+           prompt = self._build_prompt(query, results, few_shots)
+
+           # 4. LLM 답변
+           return await self.ollama.generate(prompt)
+
+       def _get_active_fewshots(self, session, intent_type):
+           statement = select(FewShot).where(
+               FewShot.is_active == True,
+               FewShot.intent_type == intent_type
+           )
+           return session.exec(statement).all()
+
+       def _build_prompt(self, query, context, few_shots):
+           parts = []
+           if few_shots:
+               parts.append("예제:\n")
+               for fs in few_shots:
+                   parts.append(f"Q: {fs.user_query}\nA: {fs.expected_response}\n")
+           parts.append(f"Context: {context}\nQuestion: {query}\nAnswer:")
+           return "\n".join(parts)
+
+   new_rag_service = NewRagService()  # 싱글톤
+   ```
+2. **Chat API 라우팅 추가** ([chat.py](backend/app/api/chat.py))
+3. **`intents` 테이블에 키워드 추가**
 
 ## Troubleshooting
 
@@ -360,9 +469,41 @@ docker exec postgres psql -U admin -d applicants_db -c "SELECT id, intent_type, 
 
 ## Important Notes
 
-- **Read-Only DB**: PostgreSQL은 읽기 전용 (분석 API만 제공, 조회 API 없음)
-- **No Auto-Migration**: FastAPI는 테이블 생성 안 함 (폐쇄망 서버는 사전 생성 필요)
+- **Read-Only Applicant DB**: `applicant_info` 테이블은 읽기 전용 (분석 API만 제공, CRUD 없음)
+- **No Auto-Migration**: FastAPI는 테이블 생성 안 함 (폐쇄망 서버는 `init.sql` 사전 실행 필요)
 - **Manual Few-shot Curation**: Query logs → 관리 UI 검토 → 승격 버튼 → Few-shots
-- **Audit Trail**: PostgreSQL 트리거로 Few-shot 변경 이력 자동 기록
-- **Korean LLM**: 모든 프롬프트는 한국어로 하드코딩
+- **Audit Trail**: PostgreSQL 트리거 `log_few_shot_audit()`로 Few-shot 변경 이력 자동 기록
+- **Korean LLM**: 모든 프롬프트는 한국어로 하드코딩 (임베딩: `jhgan/ko-sroberta-multitask`)
 - **Offline Build**: `Dockerfile.offline` + `python-packages/` 디렉토리 사용
+- **No Heavy Frameworks**: LangChain 없음 (커스텀 RAG), Alembic 없음 (SQL 마이그레이션 수동)
+
+## Quick Reference
+
+### 자주 사용하는 명령어
+```bash
+# 개발 환경 시작
+docker-compose -f docker-compose.dev.yml up -d
+
+# 로그 실시간 확인
+docker-compose logs -f backend
+
+# 백엔드 재시작 (코드 변경 후)
+docker-compose restart backend
+
+# DB 접속
+docker exec -it postgres psql -U admin -d applicants_db
+
+# Ollama 모델 테스트
+docker exec backend curl -X POST http://ollama:11434/api/generate \
+  -d '{"model":"llama3.2:1b","prompt":"안녕하세요","stream":false}'
+
+# Qdrant 컬렉션 확인
+docker exec backend curl http://qdrant:6333/collections/documents
+```
+
+### 디버깅 체크리스트
+1. **Intent 분류 안됨**: `/api/chat/classify`로 의도 확인 → `intents` 테이블에 키워드 추가
+2. **LLM 응답 없음**: Ollama 컨테이너 확인 (`docker logs ollama`), 모델 다운로드 확인
+3. **RAG 답변 부정확**: Few-shot 예제 추가 (`/api/fewshot/`), Qdrant에 문서 확인
+4. **DB 연결 실패**: `.env`의 `DATABASE_URL` 확인, 네트워크 연결 확인
+5. **볼륨 마운트 안됨**: `docker-compose.dev.yml` 사용 확인, 컨테이너 재시작

@@ -4,7 +4,7 @@ RAG 검색 vs SQL 쿼리를 판단
 """
 from enum import Enum
 from typing import Optional, List, Set
-from sqlmodel import Session, select
+from sqlmodel import Session, select, text
 from app.services.ollama_service import ollama_service
 from app.models.few_shot import Intent
 
@@ -95,7 +95,10 @@ class QueryRouter:
 
     def _check_intent_table(self, query: str, session: Session):
         """
-        intents 테이블에서 키워드 매칭 확인
+        intents 테이블에서 키워드 매칭 확인 (DB 레벨 필터링)
+
+        로직: query 문자열에 keyword가 포함되는지 확인
+        예: keyword="몇명" → query="지원자 몇명이야?" ✓ 매칭
 
         Args:
             query: 사용자 질의
@@ -107,24 +110,36 @@ class QueryRouter:
             - None: 매칭 없음
         """
         try:
-            # intents 테이블에서 모든 intent 가져오기 (priority 순서로 정렬)
-            statement = select(Intent).order_by(Intent.priority.desc())
-            intents = session.exec(statement).all()
-
+            # PostgreSQL에서 query 문자열에 keyword가 포함되는지 확인
+            # SQL: WHERE LOWER(:query) LIKE '%' || LOWER(keyword) || '%'
+            # 예: LOWER('지원자 몇명이야') LIKE '%' || LOWER('몇명') || '%'
             query_lower = query.lower()
-            matched_intent_types = []
 
-            # 우선순위가 높은 intent부터 키워드 매칭 확인
-            for intent in intents:
-                if intent.keyword.lower() in query_lower:
-                    # 유효한 intent_type만 추가
-                    try:
-                        QueryIntent(intent.intent_type)  # 유효성 검사
-                        if intent.intent_type not in matched_intent_types:
-                            matched_intent_types.append(intent.intent_type)
-                    except ValueError:
-                        # 유효하지 않은 intent_type이면 무시
-                        continue
+            # text() 함수로 원시 SQL 조건 사용
+            statement = (
+                select(Intent)
+                .where(
+                    text("LOWER(:query) LIKE '%' || LOWER(keyword) || '%'")
+                    .bindparams(query=query_lower)
+                )
+                .order_by(Intent.priority.desc())
+            )
+            matched_intents = session.exec(statement).all()
+
+            # 매칭된 intent가 없으면 None 반환
+            if not matched_intents:
+                return None
+
+            # 유효한 intent_type만 수집 (중복 제거)
+            matched_intent_types = []
+            for intent in matched_intents:
+                try:
+                    QueryIntent(intent.intent_type)  # 유효성 검사
+                    if intent.intent_type not in matched_intent_types:
+                        matched_intent_types.append(intent.intent_type)
+                except ValueError:
+                    # 유효하지 않은 intent_type이면 무시
+                    continue
 
             # 매칭 결과에 따라 반환
             if len(matched_intent_types) == 0:
