@@ -1,124 +1,248 @@
 # 폐쇄망 서버 배포 가이드
 
-## 📋 사전 준비 (인터넷 연결 환경)
+## 📋 전제 조건 (폐쇄망 서버에 이미 실행 중)
 
-### 1. 베이스 Docker 이미지 내보내기
+- Docker & Docker Compose
+- PostgreSQL (applicant_info, intents, query_logs, few_shots, few_shot_audit 테이블)
+- Ollama (llama3.2:1b 모델)
+- Qdrant
+
+**임베딩 모델 개선 (2024-11-09):**
+- ❌ 이전: sentence-transformers → 7.97GB
+- ✅ 현재: FastEmbed (ONNX Runtime) → 778MB (**90% 감소!**)
+- 다국어 모델: `sentence-transformers/paraphrase-multilingual-mpnet-base-v2` (한국어 포함, 768차원)
+
+---
+
+## 🎯 배포 방식 선택
+
+| 방식 | 파일 크기 | 폐쇄망 작업 | 권장 상황 |
+|------|----------|-----------|---------|
+| **A. 빌드 이미지 전송** | **~1.05GB** | 이미지 로드만 | 일반적인 경우 (빠름) |
+| **B. 베이스+패키지 전송** | **~1.1GB** | 빌드 5-10분 | 디버깅/보안검증 필요 시 |
+
+---
+
+## 🚀 방식 A: 빌드 이미지 전송 (빠름)
+
+### 1단계: 인터넷 환경에서 준비
 
 ```bash
-# Python 베이스 이미지 (Backend용)
-docker pull python:3.11-slim
-docker save -o python-3.11-slim.tar python:3.11-slim
+cd /path/to/llmproject
 
-# Node.js 베이스 이미지 (Frontend 빌드용)
-docker pull node:20-alpine
-docker save -o node-20-alpine.tar node:20-alpine
+# 1. FastEmbed 임베딩 모델 다운로드 (백엔드 빌드 전 필수!)
+mkdir -p backend/fastembed_cache
+docker run --rm --platform linux/amd64 \
+  -v $(pwd)/backend/fastembed_cache:/cache \
+  python:3.11-slim \
+  bash -c "pip install fastembed==0.3.1 && python -c \"from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-mpnet-base-v2', cache_dir='/cache')\""
 
-# Nginx 베이스 이미지 (Frontend 서빙용)
-docker pull nginx:alpine
-docker save -o nginx-alpine.tar nginx:alpine
+# 2. Linux AMD64용 Docker 이미지 빌드 (맥/윈도우도 --platform 필수)
+docker build --platform linux/amd64 -t llmproject-backend:latest -f backend/Dockerfile backend/
+docker build --platform linux/amd64 -t llmproject-frontend:latest -f frontend/Dockerfile frontend/
+
+# 3. 이미지 저장
+docker save -o llmproject-backend.tar llmproject-backend:latest    # 767MB
+docker save -o llmproject-frontend.tar llmproject-frontend:latest  # 50MB
+
+# 4. 프로젝트 코드 압축 (fastembed_cache 포함!)
+cd ..
+tar -czf llmproject-code.tar.gz \
+  --exclude='llmproject/frontend/node_modules' \
+  --exclude='llmproject/backend/__pycache__' \
+  --exclude='llmproject/frontend/dist' \
+  --exclude='llmproject/*.tar' \
+  llmproject/                                                        # ~250MB (fastembed_cache 포함)
+
+# 총 3개 파일 ~1.05GB
 ```
 
-### 2. Python 패키지 다운로드 (오프라인 설치용)
+### 2단계: 폐쇄망 서버로 전송
+USB나 내부망으로 3개 파일 복사
+
+### 3단계: 폐쇄망 서버에서 배포
 
 ```bash
-# backend 디렉토리에서 실행
-cd backend
-pip download -r requirements.txt -d ../python-packages/
-```
+# 이미지 로드
+docker load -i llmproject-backend.tar
+docker load -i llmproject-frontend.tar
 
-### 3. 서버로 전송할 파일 목록
+# 프로젝트 압축 해제
+tar -xzf llmproject-code.tar.gz
+cd llmproject
 
-```
-llmproject/
-├── backend/              # 백엔드 소스코드
-├── frontend/             # 프론트엔드 소스코드
-├── python-packages/      # Python 패키지들 (오프라인)
-├── docker-compose.yml    # Docker Compose 설정
-├── init.sql             # DB 테이블 생성 스크립트 (참고용)
-├── python-3.11-slim.tar # 베이스 이미지
-├── node-20-alpine.tar   # 베이스 이미지
-└── nginx-alpine.tar     # 베이스 이미지
+# 환경 변수 설정 (기존 서비스 연결 + FastEmbed 캐시 경로)
+cat > backend/.env << 'EOF'
+DATABASE_URL=postgresql://admin:admin123@postgres-container:5432/applicants_db
+OLLAMA_BASE_URL=http://ollama-container:11434
+OLLAMA_MODEL=llama3.2:1b
+QDRANT_URL=http://qdrant-container:6333
+FASTEMBED_CACHE_PATH=/app/fastembed_cache
+EOF
+
+# docker-compose.yml 수정 (build → image로 변경)
+vi docker-compose.yml
+# 각 서비스에서 다음과 같이 수정:
+#
+# backend:
+#   # build:              # ← 이 3줄 주석 처리
+#   #   context: .
+#   #   dockerfile: backend/Dockerfile.offline
+#   image: llmproject-backend:latest  # ← 주석 해제
+#   volumes:
+#     - ./backend/fastembed_cache:/app/fastembed_cache  # 이미 설정됨
+#
+# frontend:
+#   # build:              # ← 이 3줄 주석 처리
+#   #   context: ./frontend
+#   #   dockerfile: Dockerfile.offline
+#   image: llmproject-frontend:latest  # ← 주석 해제
+
+# 실행
+docker-compose up -d
+
+# 확인
+docker-compose logs -f backend
+curl http://localhost:8000/docs  # Backend API
+curl http://localhost/           # Frontend
+
+# 임베딩 모델 로드 확인
+docker logs backend 2>&1 | grep -i "fastembed"
+# 성공 시 출력:
+# ✅ FastEmbed 모델 로드 성공: sentence-transformers/paraphrase-multilingual-mpnet-base-v2
+#    캐시 디렉토리: /app/fastembed_cache
 ```
 
 ---
 
-## 🚀 폐쇄망 서버 배포 (수동 실행)
+## 🔧 방식 B: 베이스+패키지 전송 (디버깅용, 권장)
 
-### 1. 베이스 이미지 로드
+### 1단계: 인터넷 환경에서 준비
 
 ```bash
-# 베이스 이미지 3개를 Docker에 로드
+cd /path/to/llmproject
+
+# 1. 베이스 이미지 다운로드
+docker pull --platform linux/amd64 python:3.11-slim
+docker pull --platform linux/amd64 nginx:alpine
+docker pull --platform linux/amd64 node:20-alpine
+docker save -o python-3.11-slim.tar python:3.11-slim
+docker save -o nginx-alpine.tar nginx:alpine
+docker save -o node-20-alpine.tar node:20-alpine
+
+# 2. Python 패키지 다운로드
+mkdir -p python-packages
+docker run --rm --platform linux/amd64 \
+  -v $(pwd)/backend:/workspace/backend \
+  -v $(pwd)/python-packages:/workspace/python-packages \
+  -w /workspace/backend \
+  python:3.11-slim \
+  pip download -r requirements.txt -d /workspace/python-packages/
+
+# 3. FastEmbed 임베딩 모델 다운로드 (중요!)
+mkdir -p backend/fastembed_cache
+docker run --rm --platform linux/amd64 \
+  -v $(pwd)/backend/fastembed_cache:/cache \
+  -v $(pwd)/python-packages:/packages \
+  python:3.11-slim \
+  bash -c "pip install --no-index --find-links=/packages fastembed && python -c \"from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-mpnet-base-v2', cache_dir='/cache')\""
+
+# 4. 프론트엔드 node_modules 다운로드
+docker run --rm --platform linux/amd64 \
+  -v $(pwd)/frontend:/workspace \
+  -w /workspace \
+  node:20-alpine \
+  npm install
+
+# 5. 압축 (node_modules, python-packages, fastembed_cache 포함)
+cd ..
+tar -czf llmproject-full.tar.gz llmproject/  # ~1.1GB
+```
+
+### 2단계: 폐쇄망 서버로 전송
+USB나 내부망으로 llmproject-full.tar.gz 복사
+
+### 3단계: 폐쇄망 서버에서 배포
+
+```bash
+# 압축 해제
+tar -xzf llmproject-full.tar.gz
+cd llmproject
+
+# 베이스 이미지 로드
 docker load -i python-3.11-slim.tar
-docker load -i node-20-alpine.tar
 docker load -i nginx-alpine.tar
+docker load -i node-20-alpine.tar
 
-# 로드 확인
-docker images | grep -E "python|node|nginx"
-```
-
-### 2. 환경 변수 설정
-
-서버의 기존 PostgreSQL, Ollama 정보를 입력합니다.
-
-```bash
-# .env 파일 생성
-cd backend
-cp .env.example .env
-vi .env
-```
-
-**수정할 항목:**
-
-```bash
-# Ollama 설정 - 서버의 Ollama 컨테이너 주소
-OLLAMA_BASE_URL=http://ollama-container-name:11434
+# 환경 변수 설정
+cat > backend/.env << 'EOF'
+DATABASE_URL=postgresql://admin:admin123@postgres-container:5432/applicants_db
+OLLAMA_BASE_URL=http://ollama-container:11434
 OLLAMA_MODEL=llama3.2:1b
+QDRANT_URL=http://qdrant-container:6333
+FASTEMBED_CACHE_PATH=/app/fastembed_cache
+EOF
 
-# PostgreSQL 설정 - 서버의 PostgreSQL 컨테이너 주소
-DATABASE_URL=postgresql://user:password@postgres-container-name:5432/dbname
+# docker-compose.yml 확인 (방식 B는 build 사용)
+# backend: dockerfile: backend/Dockerfile.offline (FastEmbed 캐시 포함)
+# frontend: dockerfile: Dockerfile.offline (node_modules 사전 다운로드 활용)
+
+# .dockerignore 임시 백업 (frontend/node_modules 복사 허용)
+mv frontend/.dockerignore frontend/.dockerignore.bak
+
+# 빌드 및 실행 (폐쇄망에서 로컬 패키지로 설치)
+docker-compose up -d --build
+
+# .dockerignore 복원
+mv frontend/.dockerignore.bak frontend/.dockerignore
+
+# 확인
+docker-compose logs -f backend
+docker logs backend 2>&1 | grep -i "fastembed"
+# 성공 시 출력:
+# ✅ FastEmbed 모델 로드 성공: sentence-transformers/paraphrase-multilingual-mpnet-base-v2
+#    캐시 디렉토리: /app/fastembed_cache
 ```
 
-**컨테이너 이름 확인 방법:**
-```bash
-# 실행 중인 컨테이너 확인
-docker ps
+---
 
-# 네트워크 확인
-docker network ls
-docker network inspect <network-name>
-```
+## 🔗 네트워크 연결 (기존 서비스와 통신)
 
-**연결 예시:**
-- 같은 Docker 네트워크: `http://ollama:11434`, `postgresql://user:pass@postgres:5432/db`
-- 호스트 네트워크: `http://host.docker.internal:11434`
-- Docker 브리지 게이트웨이: `http://172.17.0.1:11434`
+### 방법 1: docker-compose.yml에서 기존 네트워크 사용
 
-### 3. 서버의 기존 Docker 네트워크 연결 (옵션)
-
-Backend/Frontend를 서버의 기존 PostgreSQL, Ollama와 연결하려면:
-
-**방법 1: 기존 네트워크 사용**
-```bash
+```yaml
 # docker-compose.yml 수정
-vi docker-compose.yml
-
-# networks 섹션을 수정:
 networks:
   app-network:
-    external: true
+    external: true  # 기존 네트워크 사용
     name: existing-network-name  # 서버의 기존 네트워크 이름
 ```
 
-**방법 2: 외부 네트워크 연결**
+### 방법 2: 컨테이너 시작 후 네트워크 연결
+
 ```bash
-# Backend/Frontend 실행 후
 docker network connect existing-network backend
 docker network connect existing-network frontend
 ```
 
-### 4. PostgreSQL 테이블 생성
+### 네트워크/컨테이너 확인 방법
 
-서버의 PostgreSQL에 `applicants` 테이블을 생성합니다.
+```bash
+# 실행 중인 컨테이너 확인
+docker ps
+
+# 네트워크 목록 확인
+docker network ls
+
+# 네트워크 상세 정보 (컨테이너 연결 상태)
+docker network inspect <network-name>
+```
+
+---
+
+## 🗄️ PostgreSQL 테이블 생성
+
+서버의 PostgreSQL에 필요한 테이블을 생성합니다.
 
 ```bash
 # 서버의 PostgreSQL 컨테이너에 접속
@@ -128,51 +252,40 @@ docker exec -it postgres-container-name psql -U admin -d applicants_db
 docker exec -i postgres-container-name psql -U admin -d applicants_db < init.sql
 ```
 
-**테이블 구조 (init.sql 참고):**
-```sql
-CREATE TABLE IF NOT EXISTS applicants (
-    id BIGSERIAL PRIMARY KEY,
-    reason VARCHAR(4000),
-    experience VARCHAR(4000),
-    skill VARCHAR(4000)
-);
-```
-
-### 5. 빌드 및 실행
-
-```bash
-# Backend, Frontend 빌드 + 실행 (한 번에)
-docker-compose up -d --build
-
-# 빌드 로그 확인
-docker-compose logs -f backend
-docker-compose logs -f frontend
-```
-
-**빌드 시간:**
-- Backend: 약 2-3분 (Python 패키지 설치)
-- Frontend: 약 5-10분 (npm 패키지 설치 + React 빌드)
-
-### 6. 확인
-
-```bash
-# 컨테이너 상태 확인
-docker-compose ps
-
-# Backend API 확인
-curl http://localhost:8000/health
-curl http://localhost:8000/docs
-
-# Frontend 확인
-curl http://localhost
-
-# 로그 확인
-docker-compose logs -f
-```
+**주요 테이블 (init.sql 참고):**
+- `applicant_info`: 지원자 정보 (읽기 전용)
+- `intents`: 키워드 → intent_type 매핑
+- `query_logs`: 질의 로그 자동 저장
+- `few_shots`: Few-shot 예제
+- `few_shot_audit`: 변경 이력 (트리거 자동 생성)
 
 ---
 
 ## 🔧 문제 해결
+
+### FastEmbed 모델 로드 실패
+
+**증상:** `HuggingFace Hub 접속 시도` 또는 `KeyboardInterrupt`
+
+**원인:**
+1. Dockerfile.offline에서 FastEmbed 캐시를 COPY하지 않음
+2. 폐쇄망에서 인터넷 접속 시도
+
+**해결:**
+```bash
+# 1. 캐시 디렉토리 확인
+docker exec backend ls -la /app/fastembed_cache/
+docker exec backend find /app/fastembed_cache/ -type f
+
+# 2. 예상 구조 (HuggingFace Hub 캐시 형식)
+# /app/fastembed_cache/
+# └── models--xenova--paraphrase-multilingual-mpnet-base-v2/
+#     ├── blobs/
+#     ├── refs/
+#     └── snapshots/
+
+# 3. 인터넷 환경에서 FastEmbed 모델 재다운로드 후 재배포
+```
 
 ### PostgreSQL 연결 실패
 
@@ -215,6 +328,23 @@ docker ps | grep ollama
 docker exec backend curl http://ollama-container-name:11434/api/version
 
 # 3. .env 파일에서 OLLAMA_BASE_URL 확인
+docker exec backend cat /app/.env | grep OLLAMA
+```
+
+### Qdrant 연결 실패
+
+**증상:** `Connection error` to Qdrant
+
+**해결:**
+```bash
+# 1. Qdrant 컨테이너 확인
+docker ps | grep qdrant
+
+# 2. 네트워크 연결 확인
+docker exec backend curl http://qdrant-container:6333/collections
+
+# 3. .env 파일 확인
+docker exec backend cat /app/.env | grep QDRANT
 ```
 
 ### .env 파일 수정 후 재시작
@@ -236,16 +366,6 @@ docker-compose down
 # 재빌드 + 실행
 docker-compose up -d --build
 ```
-
----
-
-## 📝 베이스 이미지 목록
-
-| 이미지 | 용도 | 크기 (약) |
-|--------|------|-----------|
-| `python:3.11-slim` | Backend 실행 환경 | ~150MB |
-| `node:20-alpine` | Frontend 빌드 | ~180MB |
-| `nginx:alpine` | Frontend 서빙 | ~40MB |
 
 ---
 
@@ -277,7 +397,15 @@ services:
 
 ---
 
-## 📌 참고사항
+## 📝 참고사항
+
+### 베이스 이미지 목록
+
+| 이미지 | 용도 | 크기 (약) |
+|--------|------|-----------|
+| `python:3.11-slim` | Backend 실행 환경 | ~150MB |
+| `node:20-alpine` | Frontend 빌드 | ~180MB |
+| `nginx:alpine` | Frontend 서빙 | ~40MB |
 
 ### Docker 네트워크 연결 방법
 
@@ -304,13 +432,44 @@ services:
     network_mode: "host"
 ```
 
-### Python 패키지 오프라인 설치
+### 배포 체크리스트
 
-현재 `backend/Dockerfile`에서 인터넷을 통해 설치합니다.
-오프라인 설치가 필요한 경우 Dockerfile을 수정하세요:
+**사전 확인:**
+- [ ] PostgreSQL, Ollama, Qdrant 실행 중
+- [ ] init.sql로 테이블 생성 완료
+- [ ] 네트워크 이름/컨테이너명 확인
+- [ ] FastEmbed 캐시 디렉토리 존재 확인
 
-```dockerfile
-# Dockerfile에 추가
-COPY python-packages/ /tmp/packages/
-RUN pip install --no-index --find-links=/tmp/packages/ -r requirements.txt
+**배포 후 검증:**
+```bash
+# API 확인
+curl http://localhost:8000/docs
+curl http://localhost/
+
+# 로그 확인 (연결 오류 체크)
+docker logs backend --tail 50
+docker logs frontend --tail 50
+
+# FastEmbed 모델 로드 확인
+docker logs backend 2>&1 | grep "FastEmbed"
 ```
+
+### FastEmbed 캐시 구조
+
+올바른 캐시 구조 (HuggingFace Hub 형식):
+```
+backend/fastembed_cache/
+└── models--xenova--paraphrase-multilingual-mpnet-base-v2/
+    ├── blobs/
+    │   └── [모델 파일들]
+    ├── refs/
+    │   └── main
+    └── snapshots/
+        └── [snapshot hash]/
+            ├── config.json
+            ├── model.onnx
+            ├── tokenizer.json
+            └── ...
+```
+
+만약 구조가 다르면 인터넷 환경에서 재다운로드 필요.
