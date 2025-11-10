@@ -22,19 +22,36 @@ class QdrantService:
         self.embedding_model_name = os.getenv("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-mpnet-base-v2")
 
         # FastEmbed 캐시 경로 설정 (폐쇄망 환경)
-        fastembed_cache = os.getenv("FASTEMBED_CACHE_PATH")
-        if fastembed_cache:
-            os.environ["FASTEMBED_CACHE_PATH"] = fastembed_cache
+        fastembed_cache = os.getenv("FASTEMBED_CACHE_PATH", "/app/fastembed_cache")
+
+        # 오프라인 모드 강제 (폐쇄망 환경에서 HuggingFace Hub 접속 차단)
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+        os.environ["HF_DATASETS_OFFLINE"] = "1"
 
         # Qdrant 클라이언트 초기화
         self.client = QdrantClient(url=self.qdrant_url)
 
         # FastEmbed 임베딩 모델 로드 (경량, 다국어 지원)
         # 캐시 경로가 설정되어 있으면 해당 경로에서 모델 로드
-        self.embedding_model = TextEmbedding(
-            model_name=self.embedding_model_name,
-            cache_dir=fastembed_cache
-        )
+        try:
+            self.embedding_model = TextEmbedding(
+                model_name=self.embedding_model_name,
+                cache_dir=fastembed_cache
+            )
+            print(f"✅ FastEmbed 모델 로드 성공: {self.embedding_model_name}")
+            print(f"   캐시 디렉토리: {fastembed_cache}")
+        except Exception as e:
+            print(f"❌ FastEmbed 모델 로드 실패: {e}")
+            print(f"   캐시 디렉토리: {fastembed_cache}")
+            print(f"   캐시 내용 확인:")
+            if os.path.exists(fastembed_cache):
+                import subprocess
+                result = subprocess.run(["find", fastembed_cache, "-type", "f"],
+                                      capture_output=True, text=True)
+                print(result.stdout)
+            raise
+
         self.vector_size = 768  # paraphrase-multilingual-mpnet-base-v2 벡터 크기
 
         # 컬렉션 생성 (없는 경우)

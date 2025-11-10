@@ -14,17 +14,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **배포 환경:** 폐쇄망 서버 (PostgreSQL, Ollama, Qdrant가 이미 실행 중)
 
+**상세 문서:** [README.md](README.md), [DEPLOY.md](DEPLOY.md), [FEWSHOT_FEATURE_GUIDE.md](FEWSHOT_FEATURE_GUIDE.md)
+
 ## Tech Stack
 
-- **Backend:** FastAPI, SQLModel, httpx, psycopg2, Qdrant, FastEmbed
+- **Backend:** FastAPI, SQLModel, Qdrant, FastEmbed (ONNX-based, 778MB vs sentence-transformers 7.97GB)
 - **Frontend:** React 19, TypeScript, Vite 7, Tailwind CSS 4
 - **LLM:** Ollama (llama3.2:1b)
 - **DB:** PostgreSQL 16 (지원자 정보, Intent, Query Logs, Few-shots)
 - **Vector DB:** Qdrant (문서 임베딩)
+- **Embedding Model:** `sentence-transformers/paraphrase-multilingual-mpnet-base-v2` (한국어 지원, 768차원)
 
 ## Development Commands
 
-### Docker (로컬 전체 스택)
+### 로컬 개발 (Docker 전체 스택)
 ```bash
 # 전체 스택 시작 (PostgreSQL, Ollama, Qdrant 포함)
 docker-compose -f docker-compose.dev.yml up -d
@@ -35,281 +38,100 @@ docker exec -it ollama ollama pull llama3.2:1b
 # 로그 확인
 docker-compose -f docker-compose.dev.yml logs -f backend
 
+# 백엔드 재시작 (코드 변경 후)
+docker-compose restart backend
+
 # 중지
 docker-compose -f docker-compose.dev.yml down
 ```
 
-### 로컬 개발 (Docker 없이)
+### 로컬 개발 (Python/Node 직접)
 ```bash
-# PostgreSQL 초기화
-createdb -U postgres applicants_db
-psql -U postgres -d applicants_db -f init.sql
-
-# Qdrant 시작
-docker run -d --name qdrant -p 6333:6333 -p 6334:6334 \
-  -v $(pwd)/qdrant_storage:/qdrant/storage qdrant/qdrant:latest
-
 # Backend
 cd backend
-python -m venv venv
-source venv/bin/activate
+python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env  # DATABASE_URL, OLLAMA_BASE_URL, QDRANT_URL 설정
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 # Frontend
 cd frontend
-npm install
-npm run dev
+npm install && npm run dev
 ```
 
-### 폐쇄망 배포
-
-**전제 조건 (폐쇄망 서버에 이미 실행 중):**
-- Docker & Docker Compose
-- PostgreSQL (applicant_info, intents, query_logs, few_shots, few_shot_audit 테이블)
-- Ollama (llama3.2:1b 모델)
-- Qdrant
-
-**임베딩 모델 개선 (2024-11-09):**
-- ❌ 이전: sentence-transformers → 7.97GB
-- ✅ 현재: FastEmbed (ONNX Runtime) → 778MB (**90% 감소!**)
-- 다국어 모델: `sentence-transformers/paraphrase-multilingual-mpnet-base-v2` (한국어 포함, 768차원)
-
-#### 배포 방식
-
-| 방식 | 파일 크기 | 폐쇄망 작업 | 권장 상황 |
-|------|----------|-----------|---------|
-| **A. 빌드 이미지 전송** | **1.05GB** | 이미지 로드만 | 일반적인 경우 (빠름) |
-| B. 베이스+패키지 전송 | 1.1GB | 빌드 5-10분 | 디버깅/보안검증 필요 시 |
-
----
-
-#### 방식 A: 빌드 이미지 전송 (권장)
-
-##### 1단계: 인터넷 환경에서 준비
-```bash
-cd /path/to/llmproject
-
-# 1. FastEmbed 임베딩 모델 다운로드 (백엔드 빌드 전 필수!)
-mkdir -p backend/fastembed_cache
-docker run --rm --platform linux/amd64 \
-  -v $(pwd)/backend/fastembed_cache:/cache \
-  python:3.11-slim \
-  bash -c "pip install fastembed==0.3.1 && python -c \"from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-mpnet-base-v2', cache_dir='/cache')\""
-
-# 2. Linux AMD64용 Docker 이미지 빌드 (맥/윈도우도 --platform 필수)
-docker build --platform linux/amd64 -t llmproject-backend:latest -f backend/Dockerfile backend/
-docker build --platform linux/amd64 -t llmproject-frontend:latest -f frontend/Dockerfile frontend/
-
-# 3. 이미지 저장
-docker save -o llmproject-backend.tar llmproject-backend:latest    # 767MB
-docker save -o llmproject-frontend.tar llmproject-frontend:latest  # 50MB
-
-# 4. 프로젝트 코드 압축 (fastembed_cache 포함!)
-cd ..
-tar -czf llmproject-code.tar.gz \
-  --exclude='llmproject/frontend/node_modules' \
-  --exclude='llmproject/backend/__pycache__' \
-  --exclude='llmproject/frontend/dist' \
-  --exclude='llmproject/*.tar' \
-  llmproject/                                                        # ~250MB (fastembed_cache 포함)
-
-# 총 3개 파일 ~1.05GB
-```
-
-##### 2단계: 폐쇄망 서버로 전송
-USB나 내부망으로 3개 파일 복사
-
-##### 3단계: 폐쇄망 서버에서 배포
-```bash
-# 이미지 로드
-docker load -i llmproject-backend.tar
-docker load -i llmproject-frontend.tar
-
-# 프로젝트 압축 해제
-tar -xzf llmproject-code.tar.gz
-cd llmproject
-
-# 환경 변수 설정 (기존 서비스 연결 + FastEmbed 캐시 경로)
-cat > backend/.env << 'EOF'
-DATABASE_URL=postgresql://admin:admin123@postgres-container:5432/applicants_db
-OLLAMA_BASE_URL=http://ollama-container:11434
-OLLAMA_MODEL=llama3.2:1b
-QDRANT_URL=http://qdrant-container:6333
-FASTEMBED_CACHE_PATH=/app/fastembed_cache
-EOF
-
-# docker-compose.yml 수정 (build → image로 변경)
-vi docker-compose.yml
-# 각 서비스에서 다음과 같이 수정:
-#
-# backend:
-#   # build:              # ← 이 3줄 주석 처리
-#   #   context: .
-#   #   dockerfile: backend/Dockerfile.offline
-#   image: llmproject-backend:latest  # ← 주석 해제
-#   volumes:
-#     - ./backend/fastembed_cache:/app/fastembed_cache  # 이미 설정됨
-#
-# frontend:
-#   # build:              # ← 이 3줄 주석 처리
-#   #   context: ./frontend
-#   #   dockerfile: Dockerfile.offline
-#   image: llmproject-frontend:latest  # ← 주석 해제
-
-# 실행
-docker-compose up -d
-
-# 확인
-docker-compose logs -f backend
-curl http://localhost:8000/docs  # Backend API
-curl http://localhost/           # Frontend
-
-# 임베딩 모델 로드 확인
-docker logs backend 2>&1 | grep -i "fastembed\|embedding"
-```
-
----
-
-#### 방식 B: 베이스+패키지 전송 (디버깅용)
-
-##### 1단계: 인터넷 환경에서 준비
-```bash
-cd /path/to/llmproject
-
-# 1. 베이스 이미지 다운로드
-docker pull --platform linux/amd64 python:3.11-slim
-docker pull --platform linux/amd64 nginx:alpine
-docker pull --platform linux/amd64 node:20-alpine
-docker save -o python-3.11-slim.tar python:3.11-slim
-docker save -o nginx-alpine.tar nginx:alpine
-docker save -o node-20-alpine.tar node:20-alpine
-
-# 2. Python 패키지 다운로드
-mkdir -p python-packages
-docker run --rm --platform linux/amd64 \
-  -v $(pwd)/backend:/workspace/backend \
-  -v $(pwd)/python-packages:/workspace/python-packages \
-  -w /workspace/backend \
-  python:3.11-slim \
-  pip download -r requirements.txt -d /workspace/python-packages/
-
-# 3. FastEmbed 임베딩 모델 다운로드
-mkdir -p backend/fastembed_cache
-docker run --rm --platform linux/amd64 \
-  -v $(pwd)/backend/fastembed_cache:/cache \
-  -v $(pwd)/python-packages:/packages \
-  python:3.11-slim \
-  bash -c "pip install --no-index --find-links=/packages fastembed && python -c \"from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-mpnet-base-v2', cache_dir='/cache')\""
-
-# 4. 프론트엔드 node_modules 다운로드
-docker run --rm --platform linux/amd64 \
-  -v $(pwd)/frontend:/workspace \
-  -w /workspace \
-  node:20-alpine \
-  npm install
-
-# 5. 압축 (node_modules, python-packages, fastembed_cache 포함)
-cd ..
-tar -czf llmproject-full.tar.gz llmproject/  # ~1.1GB
-```
-
-##### 2단계: 폐쇄망 서버로 전송
-USB나 내부망으로 llmproject-full.tar.gz 복사
-
-##### 3단계: 폐쇄망 서버에서 배포
-```bash
-# 압축 해제
-tar -xzf llmproject-full.tar.gz
-cd llmproject
-
-# 베이스 이미지 로드
-docker load -i python-3.11-slim.tar
-docker load -i nginx-alpine.tar
-docker load -i node-20-alpine.tar
-
-# 환경 변수 설정
-cat > backend/.env << 'EOF'
-DATABASE_URL=postgresql://admin:admin123@postgres-container:5432/applicants_db
-OLLAMA_BASE_URL=http://ollama-container:11434
-OLLAMA_MODEL=llama3.2:1b
-QDRANT_URL=http://qdrant-container:6333
-FASTEMBED_CACHE_PATH=/app/fastembed_cache
-EOF
-
-# docker-compose.yml 확인 (방식 B는 build 사용)
-# backend: dockerfile: backend/Dockerfile.offline
-# frontend: dockerfile: Dockerfile.offline (node_modules 사전 다운로드 활용)
-
-# .dockerignore 임시 백업 (frontend/node_modules 복사 허용)
-mv frontend/.dockerignore frontend/.dockerignore.bak
-
-# 빌드 및 실행 (폐쇄망에서 로컬 패키지로 설치)
-docker-compose up -d --build
-
-# .dockerignore 복원
-mv frontend/.dockerignore.bak frontend/.dockerignore
-
-# 확인
-docker-compose logs -f backend
-docker logs backend 2>&1 | grep -i "fastembed\|embedding"
-```
-
----
-
-#### 네트워크 연결 (기존 서비스와 통신)
-
-docker-compose.yml의 networks 설정:
-```yaml
-networks:
-  app-network:
-    external: true  # 기존 네트워크 사용
-    name: existing-network-name
-```
-
-또는 컨테이너 시작 후 연결:
-```bash
-docker network connect existing-network backend
-docker network connect existing-network frontend
-```
-
----
-
-#### 배포 체크리스트
-
-**사전 확인:**
-- [ ] PostgreSQL, Ollama, Qdrant 실행 중
-- [ ] init.sql로 테이블 생성 완료
-- [ ] 네트워크 이름/컨테이너명 확인
-
-**배포 후 검증:**
-```bash
-# API 확인
-curl http://localhost:8000/docs
-curl http://localhost/
-
-# 로그 확인 (연결 오류 체크)
-docker logs backend --tail 50
-docker logs frontend --tail 50
-```
-
-**문제 해결:**
-```bash
-# 네트워크 확인
-docker network ls
-docker network inspect <network-name>
-
-# DB 연결 테스트
-docker exec backend curl http://postgres-container:5432
-
-# 컨테이너 재시작
-docker-compose restart backend
-```
+**참고:** 폐쇄망 배포는 [DEPLOY.md](DEPLOY.md) 참조 (FastEmbed 모델 다운로드, Docker 이미지 전송 등)
 
 ## Architecture
 
-### Backend 디렉토리 구조
+### 핵심 아키텍처 패턴
+
+#### 1. Two-Tier Intent Classification ([query_router.py](backend/app/services/query_router.py))
+질의를 3가지 유형으로 분류 (rag_search, sql_query, general):
+- **Tier 1 (Fast)**: `intents` 테이블에서 키워드 매칭 (PostgreSQL `LIKE` 쿼리)
+  - 1개 매칭 → 즉시 반환
+  - 2+ 매칭 → LLM에 후보 전달하여 disambiguation
+  - 0개 매칭 → Tier 2로 fallback
+- **Tier 2 (Flexible)**: LLM 기반 분류 (Ollama llama3.2:1b)
+
+**핵심 코드:**
+```python
+# backend/app/services/query_router.py
+async def classify_intent_simple(self, query: str, session: Optional[Session]) -> QueryIntent:
+    # 1. intents 테이블 키워드 매칭
+    result = self._check_intent_table(query, session)
+    if isinstance(result, QueryIntent):
+        return result  # 1개만 매칭
+    # 2. LLM 기반 분류 (fallback)
+    return await self.classify_intent(query, intent_candidates=result)
+```
+
+#### 2. Few-Shot Integration Pattern
+모든 서비스가 `_get_active_fewshots(session, intent_type)` 메서드를 구현하여 활성 예제를 프롬프트에 주입:
+- [rag_service.py](backend/app/services/rag_service.py): RAG 검색 답변 개선
+- [sql_agent.py](backend/app/services/sql_agent.py): SQL 쿼리 생성 개선
+- [ollama_service.py](backend/app/services/ollama_service.py): 일반 대화 품질 개선
+
+**핵심 플로우:**
+```
+User Query → QueryRouter (intent 분류) → Service (_get_active_fewshots) → LLM (프롬프트 + few-shots) → Response → query_logs 저장
+```
+
+관리 UI에서 `query_logs` → Few-shot 승격 → 다음 질의부터 자동 반영
+
+#### 3. Singleton Service Pattern
+모든 서비스는 모듈 레벨에서 인스턴스화 (FastAPI 라이프사이클과 독립):
+```python
+# backend/app/services/ollama_service.py
+class OllamaService:
+    def __init__(self):
+        self.base_url = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
+        # ...
+
+ollama_service = OllamaService()  # 싱글톤
+
+# backend/app/api/analysis.py
+from app.services.ollama_service import ollama_service  # import로 재사용
+```
+
+#### 4. DB Session Management (Dependency Injection)
+FastAPI `Depends(get_session)`으로 DB 세션 자동 관리:
+```python
+# backend/app/api/chat.py
+@router.post("/")
+async def chat(request: ChatRequest, session: Session = Depends(get_session)):
+    # session은 자동으로 생성/종료
+    intent = await query_router.classify_intent_simple(request.query, session)
+```
+
+### 데이터베이스 스키마 (PostgreSQL)
+- `applicant_info`: 지원자 정보 (읽기 전용, CRUD 없음)
+- `intents`: 키워드 → intent_type 매핑 (Two-tier 분류 Tier 1)
+- `query_logs`: 모든 질의 자동 저장 (Few-shot 후보)
+- `few_shots`: 승격된 Few-shot 예제 (LLM 프롬프트에 주입)
+- `few_shot_audit`: 변경 이력 (PostgreSQL 트리거로 자동 기록)
+
+상세 스키마: [init.sql](init.sql)
+
+### 디렉토리 구조
 ```
 backend/app/
 ├── api/              # API 엔드포인트
@@ -320,8 +142,6 @@ backend/app/
 │   ├── query_log.py  # Query Log 관리 API
 │   └── fewshot.py    # Few-shot 관리 API
 ├── models/           # 데이터 모델 (SQLModel)
-│   ├── applicant.py  # ApplicantInfo 모델
-│   └── few_shot.py   # Intent, QueryLog, FewShot, FewShotAudit 모델
 ├── services/         # 비즈니스 로직 (싱글톤)
 │   ├── ollama_service.py   # LLM 호출
 │   ├── qdrant_service.py   # 벡터 DB 검색
@@ -332,191 +152,47 @@ backend/app/
 └── main.py           # FastAPI 앱 및 라우터 등록
 ```
 
-### 시스템 구조
-```
-┌─────────────┐
-│   Client    │
-│  (Browser)  │
-└──────┬──────┘
-       │
-┌──────▼──────────────────────────────────────────────┐
-│  Frontend (React + Nginx)                           │
-│  - Applicant Analysis UI                            │
-│  - RAG Chat UI                                      │
-│  - Intent/Query Log/Few-shot Management UI          │
-└──────┬──────────────────────────────────────────────┘
-       │
-┌──────▼──────────────────────────────────────────────┐
-│  Backend (FastAPI)                                  │
-│  ├─ Analysis API     (지원자 분석)                   │
-│  ├─ Chat API         (RAG 채팅, QueryRouter)        │
-│  ├─ Upload API       (문서 업로드)                   │
-│  └─ Management APIs  (Intent/Query Log/Few-shot)    │
-└─┬────┬────┬──────────────────────────────────────┬──┘
-  │    │    │                                      │
-  │    │    │ ┌────────────────────────────────┐  │
-  │    │    └─┤ Qdrant (Vector DB)             │  │
-  │    │      │ - 문서 임베딩 저장              │  │
-  │    │      │ - 유사도 검색                   │  │
-  │    │      └────────────────────────────────┘  │
-  │    │                                           │
-  │    │ ┌─────────────────────────────────────┐  │
-  │    └─┤ Ollama (LLM)                        │  │
-  │      │ - llama3.2:1b                       │  │
-  │      │ - 요약/키워드/질문/답변 생성         │  │
-  │      └─────────────────────────────────────┘  │
-  │                                                │
-  │ ┌──────────────────────────────────────────┐  │
-  └─┤ PostgreSQL                               │◄─┘
-    │ - applicant_info (지원자 정보)            │
-    │ - intents (키워드 매칭)                   │
-    │ - query_logs (질의 로그)                  │
-    │ - few_shots (Few-shot 예제)               │
-    │ - few_shot_audit (변경 이력)              │
-    └──────────────────────────────────────────┘
-```
-
-### 데이터베이스 스키마
-- `applicant_info` (id, reason, experience, skill) - 지원자 정보
-- `intents` (keyword, intent_type, priority) - 키워드 기반 의도 매핑
-- `query_logs` (query_text, detected_intent, response, is_converted_to_fewshot) - 질의 로그
-- `few_shots` (source_query_log_id, intent_type, user_query, expected_response, is_active) - Few-shot 예제
-- `few_shot_audit` (few_shot_id, action, old_value, new_value) - 변경 이력 (트리거 자동 생성)
-
-### RAG 채팅 플로우
-```
-User Query
-    ↓
-QueryRouter (Intent 분류)
-    ├─ intents 테이블 키워드 매칭 (빠름)
-    └─ LLM 분류 (fallback)
-    ↓
-Intent Type 결정
-    ├─ rag_search  → Qdrant 검색 + Few-shots + LLM 답변
-    ├─ sql_query   → NL→SQL 변환 + PostgreSQL 조회 + 결과 해석
-    └─ general     → Few-shots + LLM 대화
-    ↓
-Response 생성
-    ↓
-query_logs 자동 저장 (추후 Few-shot 승격 가능)
-```
-
-### 주요 패턴
-1. **Two-tier Intent Classification**:
-   - Tier 1: `intents` 테이블 키워드 매칭 (빠름, 결정적)
-     - 1개 매칭 → 즉시 반환
-     - 2+ 매칭 → LLM에 후보 전달하여 disambiguation
-     - 0개 매칭 → LLM fallback
-   - Tier 2: LLM 기반 분류 (느림, 유연함)
-
-2. **Few-shot Integration**: 모든 서비스가 `_get_active_fewshots(session, intent_type="...")`로 활성 예제 조회하여 프롬프트에 포함
-
-3. **Query Logging**: 모든 질의 자동 저장 → 관리 UI에서 검토 → 승격 버튼 → Few-shot 테이블 → 다음 질의에 반영
-
-4. **Dependency Injection**: FastAPI `Depends(get_session)`로 DB 세션 관리
-
-5. **Singleton Services**: 모듈 레벨에서 인스턴스화 (예: `ollama_service`, `rag_service`, `query_router`)
-   ```python
-   # services/ollama_service.py
-   ollama_service = OllamaService()  # 싱글톤
-
-   # api/analysis.py
-   from app.services.ollama_service import ollama_service  # import로 재사용
-   ```
-
-6. **Security Pattern**: SQL Agent는 패턴 매칭만 사용 (동적 SQL 실행 금지, SQL injection 방지)
-
 ## Environment Variables
 
-**필수:**
-- `DATABASE_URL`: `postgresql://admin:admin123@postgres:5432/applicants_db`
-- `OLLAMA_BASE_URL`: `http://ollama:11434`
+**필수 (.env):**
+- `DATABASE_URL`: PostgreSQL 연결 (예: `postgresql://admin:admin123@postgres:5432/applicants_db`)
+- `OLLAMA_BASE_URL`: Ollama API (예: `http://ollama:11434`)
 - `OLLAMA_MODEL`: `llama3.2:1b`
-- `QDRANT_URL`: `http://qdrant:6333`
+- `QDRANT_URL`: Qdrant API (예: `http://qdrant:6333`)
+- `FASTEMBED_CACHE_PATH`: FastEmbed 모델 캐시 디렉토리 (예: `/app/fastembed_cache`)
 
 **선택:**
-- `DB_SCHEMA`: `public` (default)
 - `QDRANT_COLLECTION_NAME`: `documents` (default)
 - `EMBEDDING_MODEL`: `sentence-transformers/paraphrase-multilingual-mpnet-base-v2` (default)
 
-## API Endpoints
-
-### 지원자 분석
-- `POST /api/analysis/summarize/{applicant_id}` - 요약
-- `POST /api/analysis/keywords/{applicant_id}` - 키워드 추출
-- `POST /api/analysis/interview-questions/{applicant_id}` - 면접 질문
-
-### RAG 채팅
-- `POST /api/chat/` - 자연어 질의 (QueryRouter 자동 라우팅)
-- `POST /api/chat/classify` - 의도 분류 디버깅
-
-### 문서 업로드
-- `POST /api/upload/` - 파일 업로드 (PDF/DOCX/TXT/XLSX)
-- `GET /api/upload/stats` - 업로드 통계
-
-### Intent/Query Log/Few-shot 관리
-- `GET/POST/PUT/DELETE /api/intent/`
-- `GET/POST/DELETE /api/query-logs/`
-- `POST /api/query-logs/convert-to-fewshot` - 질의 로그 → Few-shot 승격
-- `GET/POST/PUT/DELETE /api/fewshot/`
-
-API 문서: http://localhost:8000/docs
-
 ## Development Workflow
-
-### Hot Reload
-`docker-compose.dev.yml` 사용 시 `backend/app/` 볼륨 마운트 → 코드 변경 자동 반영
 
 ### 코드 변경
 ```bash
 # Hot reload (docker-compose.dev.yml 사용 시 자동 반영)
 # backend/app/ 디렉토리는 볼륨 마운트되어 있음
 
-# 환경 변수 변경만: 재시작
+# 환경 변수 변경: 재시작만
 docker-compose restart backend
 
-# 의존성 변경 (requirements.txt): 재빌드 필요
+# 의존성 변경 (requirements.txt): 재빌드
 docker-compose up -d --build backend
-
-# 단일 파일 빠른 복사 (볼륨 미사용 시)
-docker cp backend/app/api/analysis.py backend:/app/app/api/
-docker-compose restart backend
 ```
 
 ### DB 마이그레이션
-1. `migrations/` 디렉토리에 SQL 파일 생성 (예: `003_add_column.sql`)
-2. 로컬 테스트: `psql -d applicants_db -f migrations/003_add_column.sql`
+1. SQL 파일 작성 (수동, Alembic 없음)
+2. `psql`로 로컬 테스트
 3. `init.sql` 업데이트 (새 설치 환경용)
 4. 폐쇄망 서버: PostgreSQL 컨테이너에서 수동 실행
 
-**Note:** Alembic 없음 - 수동 SQL 마이그레이션만 지원
+### API 테스트
+- API 문서: http://localhost:8000/docs
+- Intent 분류 디버깅: `POST /api/chat/classify {"query": "..."}`
 
 ## Adding Features
 
-### 새 분석 API
-1. `OllamaService`에 메서드 추가 ([ollama_service.py](backend/app/services/ollama_service.py))
-   ```python
-   async def new_analysis(self, text: str) -> str:
-       prompt = f"Analyze: {text}"
-       return await self.generate(prompt)
-   ```
-2. API 엔드포인트 추가 ([analysis.py](backend/app/api/analysis.py))
-   ```python
-   @router.post("/new-analysis/{applicant_id}")
-   async def new_analysis(applicant_id: int, session: Session = Depends(get_session)):
-       applicant = session.get(ApplicantInfo, applicant_id)
-       result = await ollama_service.new_analysis(applicant.reason)
-       return {"result": result}
-   ```
-3. `main.py`에 라우터 등록 (이미 analysis_router가 등록되어 있으면 자동 포함)
-
-### 새 Intent Type
-1. **관리 UI 또는 SQL로 `intents` 테이블에 추가**
-   ```sql
-   INSERT INTO intents (keyword, intent_type, priority, description)
-   VALUES ('새키워드', 'new_intent', 5, '새로운 의도');
-   ```
-2. **`QueryRouter`의 `QueryIntent` enum 확장** ([query_router.py](backend/app/services/query_router.py))
+### 새 Intent Type 추가
+1. **`QueryRouter`의 `QueryIntent` enum 확장** ([query_router.py](backend/app/services/query_router.py:12))
    ```python
    class QueryIntent(str, Enum):
        RAG_SEARCH = "rag_search"
@@ -524,129 +200,85 @@ docker-compose restart backend
        GENERAL = "general"
        NEW_INTENT = "new_intent"  # 추가
    ```
-3. **서비스 핸들러 생성** (`backend/app/services/new_service.py`)
-   - `_get_active_fewshots(session, intent_type="new_intent")` 필수 포함
-   - Few-shots를 프롬프트에 주입
-4. **Chat API에서 라우팅 추가** ([chat.py](backend/app/api/chat.py))
+
+2. **서비스 핸들러 생성** (예: `backend/app/services/new_service.py`)
+   - 필수: `_get_active_fewshots(session, intent_type="new_intent")` 메서드 구현
+   - Few-shots를 프롬프트에 주입하여 LLM 호출
+
+3. **Chat API 라우팅 추가** ([chat.py](backend/app/api/chat.py))
    ```python
    elif intent == QueryIntent.NEW_INTENT:
        result = await new_service.handle(query, session)
    ```
-5. **테스트**: `POST /api/chat/classify {"query": "새키워드 포함 질문"}`
-6. **관리 UI에서 Few-shot 예제 추가** (Query Logs → 승격)
 
-### 새 RAG 서비스
-1. **서비스 클래스 생성** (`backend/app/services/new_rag_service.py`)
-   ```python
-   class NewRagService:
-       def __init__(self):
-           self.ollama = ollama_service
-           self.qdrant = qdrant_service
-
-       async def handle(self, query: str, session: Session):
-           # 1. Few-shots 조회
-           few_shots = self._get_active_fewshots(session, "new_rag")
-
-           # 2. Qdrant 검색 또는 다른 로직
-           results = self.qdrant.search(query)
-
-           # 3. 프롬프트 생성 (Few-shots 포함)
-           prompt = self._build_prompt(query, results, few_shots)
-
-           # 4. LLM 답변
-           return await self.ollama.generate(prompt)
-
-       def _get_active_fewshots(self, session, intent_type):
-           statement = select(FewShot).where(
-               FewShot.is_active == True,
-               FewShot.intent_type == intent_type
-           )
-           return session.exec(statement).all()
-
-       def _build_prompt(self, query, context, few_shots):
-           parts = []
-           if few_shots:
-               parts.append("예제:\n")
-               for fs in few_shots:
-                   parts.append(f"Q: {fs.user_query}\nA: {fs.expected_response}\n")
-           parts.append(f"Context: {context}\nQuestion: {query}\nAnswer:")
-           return "\n".join(parts)
-
-   new_rag_service = NewRagService()  # 싱글톤
+4. **`intents` 테이블에 키워드 추가** (관리 UI 또는 SQL)
+   ```sql
+   INSERT INTO intents (keyword, intent_type, priority, description)
+   VALUES ('새키워드', 'new_intent', 10, '새로운 의도');
    ```
-2. **Chat API 라우팅 추가** ([chat.py](backend/app/api/chat.py))
-3. **`intents` 테이블에 키워드 추가**
+
+5. **Few-shot 예제 추가** (관리 UI: Query Logs → 승격)
+
+6. **테스트**: `POST /api/chat/classify {"query": "새키워드 포함 질문"}`
+
+### 새 분석 API 추가
+1. `OllamaService`에 메서드 추가 ([ollama_service.py](backend/app/services/ollama_service.py))
+2. API 엔드포인트 추가 ([analysis.py](backend/app/api/analysis.py))
+3. `main.py`에 라우터 자동 포함됨 (analysis_router 이미 등록)
 
 ## Troubleshooting
 
 ### 연결 오류
 ```bash
-# PostgreSQL
-docker exec backend ping postgres
+# PostgreSQL 연결 확인
 docker exec postgres psql -U admin -d applicants_db -c "SELECT 1"
 
-# Ollama
+# Ollama 연결 확인
 docker exec backend curl http://ollama:11434/api/version
 
-# Qdrant
+# Qdrant 연결 확인
 docker exec backend curl http://qdrant:6333/collections
 ```
 
 ### 네트워크 문제
 ```bash
-# 네트워크 확인
 docker network inspect dev-network
-
-# 네트워크 연결
 docker network connect dev-network backend
 ```
 
-### 데이터 확인
-```bash
-# 지원자 데이터
-docker exec postgres psql -U admin -d applicants_db -c "SELECT id, length(reason), length(experience), length(skill) FROM applicant_info;"
+## Important Constraints
 
-# Few-shot 예제
-docker exec postgres psql -U admin -d applicants_db -c "SELECT id, intent_type, is_active FROM few_shots;"
-```
-
-## Important Notes
-
-- **Read-Only Applicant DB**: `applicant_info` 테이블은 읽기 전용 (분석 API만 제공, CRUD 없음)
-- **No Auto-Migration**: FastAPI는 테이블 생성 안 함 (폐쇄망 서버는 `init.sql` 사전 실행 필요)
-- **Manual Few-shot Curation**: Query logs → 관리 UI 검토 → 승격 버튼 → Few-shots
-- **Audit Trail**: PostgreSQL 트리거 `log_few_shot_audit()`로 Few-shot 변경 이력 자동 기록
-- **Korean LLM**: 모든 프롬프트는 한국어로 하드코딩 (임베딩: `sentence-transformers/paraphrase-multilingual-mpnet-base-v2`)
-- **Offline Build**: `Dockerfile.offline` + `python-packages/` 디렉토리 사용
-- **No Heavy Frameworks**: LangChain 없음 (커스텀 RAG), Alembic 없음 (SQL 마이그레이션 수동)
+- **Read-Only Applicant DB**: `applicant_info` 테이블은 읽기 전용 (CRUD 없음, 분석만)
+- **No Auto-Migration**: 테이블 생성 안 함 (폐쇄망 서버는 `init.sql` 사전 실행 필수)
+- **Manual Few-shot Curation**: Query logs → 관리 UI 검토 → 승격 버튼 (자동 승격 없음)
+- **Audit Trail**: PostgreSQL 트리거로 Few-shot 변경 이력 자동 기록
+- **Korean-Only**: 모든 프롬프트 한국어 (다국어 지원 없음)
+- **No Heavy Frameworks**: LangChain 없음 (커스텀 RAG), Alembic 없음 (수동 마이그레이션)
+- **Offline Deployment**: `Dockerfile.offline` + 사전 다운로드된 패키지 사용 ([DEPLOY.md](DEPLOY.md))
+- **Security**: SQL Agent는 패턴 매칭만 사용 (동적 SQL 실행 금지, SQL injection 방지)
 
 ## Quick Reference
 
 ### 자주 사용하는 명령어
 ```bash
-# 개발 환경 시작
+# 개발 환경 시작/중지
 docker-compose -f docker-compose.dev.yml up -d
+docker-compose -f docker-compose.dev.yml down
 
-# 로그 실시간 확인
+# 로그 확인
 docker-compose logs -f backend
-
-# 백엔드 재시작 (코드 변경 후)
-docker-compose restart backend
 
 # DB 접속
 docker exec -it postgres psql -U admin -d applicants_db
 
-# Ollama 모델 테스트
+# Ollama 테스트
 docker exec backend curl -X POST http://ollama:11434/api/generate \
   -d '{"model":"llama3.2:1b","prompt":"안녕하세요","stream":false}'
-
-# Qdrant 컬렉션 확인
-docker exec backend curl http://qdrant:6333/collections/documents
 ```
 
 ### 디버깅 체크리스트
-1. **Intent 분류 안됨**: `/api/chat/classify`로 의도 확인 → `intents` 테이블에 키워드 추가
-2. **LLM 응답 없음**: Ollama 컨테이너 확인 (`docker logs ollama`), 모델 다운로드 확인
-3. **RAG 답변 부정확**: Few-shot 예제 추가 (`/api/fewshot/`), Qdrant에 문서 확인
-4. **DB 연결 실패**: `.env`의 `DATABASE_URL` 확인, 네트워크 연결 확인
-5. **볼륨 마운트 안됨**: `docker-compose.dev.yml` 사용 확인, 컨테이너 재시작
+1. **Intent 분류 안됨**: `POST /api/chat/classify` → `intents` 테이블 키워드 추가
+2. **LLM 응답 없음**: `docker logs ollama` → 모델 다운로드 확인
+3. **RAG 답변 부정확**: Few-shot 예제 추가, Qdrant 문서 확인
+4. **DB 연결 실패**: `.env` `DATABASE_URL` 확인, 네트워크 연결 확인
+5. **임베딩 모델 로드 실패**: `FASTEMBED_CACHE_PATH` 볼륨 마운트 확인
