@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Optional
 from sqlmodel import Field, SQLModel, Column, String, DateTime, Boolean, Integer, Text, JSON, BigInteger
 from sqlalchemy import text
+import os
 
 
 # Intent 모델 (키워드-의도 매핑)

@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Optional
 from sqlmodel import Field, SQLModel, Column, String, Text, BigInteger
 from sqlalchemy import text
+import os
 
 
 class QueryLog(SQLModel, table=True):
