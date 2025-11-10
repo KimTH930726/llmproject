@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Tech Stack
 
-- **Backend:** FastAPI, SQLModel, httpx, psycopg2, Qdrant, Sentence Transformers
+- **Backend:** FastAPI, SQLModel, httpx, psycopg2, Qdrant, FastEmbed
 - **Frontend:** React 19, TypeScript, Vite 7, Tailwind CSS 4
 - **LLM:** Ollama (llama3.2:1b)
 - **DB:** PostgreSQL 16 (지원자 정보, Intent, Query Logs, Few-shots)
