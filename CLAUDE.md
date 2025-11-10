@@ -94,9 +94,9 @@ cd /path/to/llmproject
 # 1. FastEmbed 임베딩 모델 다운로드 (백엔드 빌드 전 필수!)
 mkdir -p backend/fastembed_cache
 docker run --rm --platform linux/amd64 \
-  -v $(pwd)/backend/fastembed_cache:/root/.cache/fastembed \
+  -v $(pwd)/backend/fastembed_cache:/cache \
   python:3.11-slim \
-  bash -c "pip install fastembed==0.3.1 && python -c \"from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-mpnet-base-v2')\""
+  bash -c "pip install fastembed==0.3.1 && python -c \"from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-mpnet-base-v2', cache_dir='/cache')\""
 
 # 2. Linux AMD64용 Docker 이미지 빌드 (맥/윈도우도 --platform 필수)
 docker build --platform linux/amd64 -t llmproject-backend:latest -f backend/Dockerfile backend/
@@ -198,10 +198,10 @@ docker run --rm --platform linux/amd64 \
 # 3. FastEmbed 임베딩 모델 다운로드
 mkdir -p backend/fastembed_cache
 docker run --rm --platform linux/amd64 \
-  -v $(pwd)/backend/fastembed_cache:/root/.cache/fastembed \
+  -v $(pwd)/backend/fastembed_cache:/cache \
   -v $(pwd)/python-packages:/packages \
   python:3.11-slim \
-  bash -c "pip install --no-index --find-links=/packages fastembed && python -c \"from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-mpnet-base-v2')\""
+  bash -c "pip install --no-index --find-links=/packages fastembed && python -c \"from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-mpnet-base-v2', cache_dir='/cache')\""
 
 # 4. 프론트엔드 node_modules 다운로드
 docker run --rm --platform linux/amd64 \

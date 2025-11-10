@@ -35,9 +35,9 @@
 # 1. 인터넷 환경 - FastEmbed 모델 다운로드 필수!
 mkdir -p backend/fastembed_cache
 docker run --rm --platform linux/amd64 \
-  -v $(pwd)/backend/fastembed_cache:/root/.cache/fastembed \
+  -v $(pwd)/backend/fastembed_cache:/cache \
   python:3.11-slim \
-  bash -c "pip install fastembed==0.3.1 && python -c \"from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-mpnet-base-v2')\""
+  bash -c "pip install fastembed==0.3.1 && python -c \"from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-mpnet-base-v2', cache_dir='/cache')\""
 
 docker build --platform linux/amd64 -t llmproject-backend:latest -f backend/Dockerfile backend/
 docker build --platform linux/amd64 -t llmproject-frontend:latest -f frontend/Dockerfile frontend/
