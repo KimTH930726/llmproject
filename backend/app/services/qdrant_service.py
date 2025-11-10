@@ -19,7 +19,7 @@ class QdrantService:
         self.qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
         self.collection_name = os.getenv("QDRANT_COLLECTION_NAME", "documents")
         # FastEmbed 다국어 모델 (한국어 포함)
-        self.embedding_model_name = os.getenv("EMBEDDING_MODEL", "paraphrase-multilingual-mpnet-base-v2")
+        self.embedding_model_name = os.getenv("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-mpnet-base-v2")
 
         # FastEmbed 캐시 경로 설정 (폐쇄망 환경)
         fastembed_cache = os.getenv("FASTEMBED_CACHE_PATH")

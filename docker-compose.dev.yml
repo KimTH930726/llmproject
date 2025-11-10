@@ -79,7 +79,7 @@ services:
       QDRANT_URL: http://qdrant:6333
       QDRANT_COLLECTION_NAME: documents
       # FastEmbed 임베딩 모델 설정
-      EMBEDDING_MODEL: paraphrase-multilingual-mpnet-base-v2
+      EMBEDDING_MODEL: sentence-transformers/paraphrase-multilingual-mpnet-base-v2
       FASTEMBED_CACHE_PATH: /app/fastembed_cache
     depends_on:
       postgres:

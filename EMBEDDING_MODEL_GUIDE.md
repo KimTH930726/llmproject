@@ -15,8 +15,8 @@
 
 | 모델 이름 | 벡터 차원 | 언어 지원 | 용도 |
 |----------|----------|---------|------|
-| `paraphrase-multilingual-mpnet-base-v2` | 768 | **기본 설정**, 한국어 포함 | 범용 |
-| `paraphrase-multilingual-MiniLM-L6-v2` | 384 | 한국어 포함, 경량 | 빠른 처리 |
+| `sentence-transformers/paraphrase-multilingual-mpnet-base-v2` | 768 | **기본 설정**, 한국어 포함 | 범용 |
+| `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | 384 | 한국어 포함, 경량 | 빠른 처리 |
 | `intfloat/multilingual-e5-large` | 1024 | 한국어 포함, 고성능 | 정확도 우선 |
 
 **참고**: FastEmbed는 한국어 전용 모델은 지원하지 않지만, 다국어 모델이 한국어를 포함합니다.
@@ -30,16 +30,16 @@
 `backend/.env`:
 ```bash
 # 기본 (현재 설정)
-EMBEDDING_MODEL=paraphrase-multilingual-mpnet-base-v2
+EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-mpnet-base-v2
 
 # 경량 모델 (384차원)
-EMBEDDING_MODEL=paraphrase-multilingual-MiniLM-L6-v2
+EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
 
 # 고성능 모델 (1024차원)
 EMBEDDING_MODEL=intfloat/multilingual-e5-large
 ```
 
-**주의**: FastEmbed는 `sentence-transformers/` 프리픽스 없이 모델명을 사용합니다.
+**주의**: FastEmbed는 공식 모델 이름을 사용합니다 (`sentence-transformers/` 프리픽스 포함).
 
 ### 2단계: qdrant_service.py 수정
 

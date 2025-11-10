@@ -74,7 +74,7 @@ npm run dev
 **임베딩 모델 개선 (2024-11-09):**
 - ❌ 이전: sentence-transformers → 7.97GB
 - ✅ 현재: FastEmbed (ONNX Runtime) → 778MB (**90% 감소!**)
-- 다국어 모델: `paraphrase-multilingual-mpnet-base-v2` (한국어 포함, 768차원)
+- 다국어 모델: `sentence-transformers/paraphrase-multilingual-mpnet-base-v2` (한국어 포함, 768차원)
 
 #### 배포 방식
 
@@ -96,7 +96,7 @@ mkdir -p backend/fastembed_cache
 docker run --rm --platform linux/amd64 \
   -v $(pwd)/backend/fastembed_cache:/root/.cache/fastembed \
   python:3.11-slim \
-  bash -c "pip install fastembed==0.3.1 && python -c \"from fastembed import TextEmbedding; TextEmbedding(model_name='paraphrase-multilingual-mpnet-base-v2')\""
+  bash -c "pip install fastembed==0.3.1 && python -c \"from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-mpnet-base-v2')\""
 
 # 2. Linux AMD64용 Docker 이미지 빌드 (맥/윈도우도 --platform 필수)
 docker build --platform linux/amd64 -t llmproject-backend:latest -f backend/Dockerfile backend/
@@ -201,7 +201,7 @@ docker run --rm --platform linux/amd64 \
   -v $(pwd)/backend/fastembed_cache:/root/.cache/fastembed \
   -v $(pwd)/python-packages:/packages \
   python:3.11-slim \
-  bash -c "pip install --no-index --find-links=/packages fastembed && python -c \"from fastembed import TextEmbedding; TextEmbedding(model_name='paraphrase-multilingual-mpnet-base-v2')\""
+  bash -c "pip install --no-index --find-links=/packages fastembed && python -c \"from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-mpnet-base-v2')\""
 
 # 4. 프론트엔드 node_modules 다운로드
 docker run --rm --platform linux/amd64 \
@@ -437,7 +437,7 @@ query_logs 자동 저장 (추후 Few-shot 승격 가능)
 **선택:**
 - `DB_SCHEMA`: `public` (default)
 - `QDRANT_COLLECTION_NAME`: `documents` (default)
-- `EMBEDDING_MODEL`: `paraphrase-multilingual-mpnet-base-v2` (default)
+- `EMBEDDING_MODEL`: `sentence-transformers/paraphrase-multilingual-mpnet-base-v2` (default)
 
 ## API Endpoints
 
@@ -616,7 +616,7 @@ docker exec postgres psql -U admin -d applicants_db -c "SELECT id, intent_type, 
 - **No Auto-Migration**: FastAPI는 테이블 생성 안 함 (폐쇄망 서버는 `init.sql` 사전 실행 필요)
 - **Manual Few-shot Curation**: Query logs → 관리 UI 검토 → 승격 버튼 → Few-shots
 - **Audit Trail**: PostgreSQL 트리거 `log_few_shot_audit()`로 Few-shot 변경 이력 자동 기록
-- **Korean LLM**: 모든 프롬프트는 한국어로 하드코딩 (임베딩: `paraphrase-multilingual-mpnet-base-v2`)
+- **Korean LLM**: 모든 프롬프트는 한국어로 하드코딩 (임베딩: `sentence-transformers/paraphrase-multilingual-mpnet-base-v2`)
 - **Offline Build**: `Dockerfile.offline` + `python-packages/` 디렉토리 사용
 - **No Heavy Frameworks**: LangChain 없음 (커스텀 RAG), Alembic 없음 (SQL 마이그레이션 수동)
 

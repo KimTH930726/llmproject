@@ -20,7 +20,7 @@
 | **배포** | Docker, Docker Compose | **폐쇄망 배포 전용** |
 
 ### 임베딩 모델 (FastEmbed)
-- 현재: `paraphrase-multilingual-mpnet-base-v2` (768차원, 한국어 포함)
+- 현재: `sentence-transformers/paraphrase-multilingual-mpnet-base-v2` (768차원, 한국어 포함)
 - 이전 대비: **90% 크기 감소** (sentence-transformers 7.97GB → FastEmbed 778MB)
 
 ---
@@ -37,7 +37,7 @@ mkdir -p backend/fastembed_cache
 docker run --rm --platform linux/amd64 \
   -v $(pwd)/backend/fastembed_cache:/root/.cache/fastembed \
   python:3.11-slim \
-  bash -c "pip install fastembed==0.3.1 && python -c \"from fastembed import TextEmbedding; TextEmbedding(model_name='paraphrase-multilingual-mpnet-base-v2')\""
+  bash -c "pip install fastembed==0.3.1 && python -c \"from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-mpnet-base-v2')\""
 
 docker build --platform linux/amd64 -t llmproject-backend:latest -f backend/Dockerfile backend/
 docker build --platform linux/amd64 -t llmproject-frontend:latest -f frontend/Dockerfile frontend/
