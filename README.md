@@ -29,31 +29,38 @@
 
 > **전제 조건**: Docker, Docker Compose, PostgreSQL, Ollama (llama3.2:1b), Qdrant 실행 중
 
-### 방식 A: 빌드 이미지 전송 (권장, 870MB)
+### 방식 A: 빌드 이미지 전송 (권장, 1.05GB)
 
 ```bash
-# 1. 인터넷 환경
+# 1. 인터넷 환경 - FastEmbed 모델 다운로드 필수!
+mkdir -p backend/fastembed_cache
+docker run --rm --platform linux/amd64 \
+  -v $(pwd)/backend/fastembed_cache:/root/.cache/fastembed \
+  python:3.11-slim \
+  bash -c "pip install fastembed==0.3.1 && python -c \"from fastembed import TextEmbedding; TextEmbedding(model_name='paraphrase-multilingual-mpnet-base-v2')\""
+
 docker build --platform linux/amd64 -t llmproject-backend:latest -f backend/Dockerfile backend/
 docker build --platform linux/amd64 -t llmproject-frontend:latest -f frontend/Dockerfile frontend/
-docker save -o llmproject-backend.tar llmproject-backend:latest    # 767MB
-docker save -o llmproject-frontend.tar llmproject-frontend:latest  # 50MB
-tar -czf llmproject-code.tar.gz --exclude=node_modules --exclude=*.tar llmproject/
+docker save -o llmproject-backend.tar llmproject-backend:latest
+docker save -o llmproject-frontend.tar llmproject-frontend:latest
+tar -czf llmproject-code.tar.gz --exclude=frontend/node_modules --exclude=*.tar llmproject/
 
 # 2. 폐쇄망 서버
 docker load -i llmproject-backend.tar
 docker load -i llmproject-frontend.tar
 tar -xzf llmproject-code.tar.gz && cd llmproject
 
-# 환경 변수 설정
+# 환경 변수 설정 (FastEmbed 캐시 경로 추가)
 cat > backend/.env << 'EOF'
 DATABASE_URL=postgresql://admin:admin123@postgres-container:5432/applicants_db
 OLLAMA_BASE_URL=http://ollama-container:11434
 OLLAMA_MODEL=llama3.2:1b
 QDRANT_URL=http://qdrant-container:6333
+FASTEMBED_CACHE_PATH=/app/fastembed_cache
 EOF
 
-# docker-compose.yml 수정 (build → image)
-vi docker-compose.yml  # backend/frontend에 image 추가
+# docker-compose.yml 수정 (build → image, fastembed_cache 볼륨)
+vi docker-compose.yml  # backend에 image + volumes 추가
 
 # 실행
 docker-compose up -d

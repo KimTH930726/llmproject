@@ -78,8 +78,9 @@ services:
       # Qdrant 설정
       QDRANT_URL: http://qdrant:6333
       QDRANT_COLLECTION_NAME: documents
-      # 임베딩 모델 설정
-      EMBEDDING_MODEL: jhgan/ko-sroberta-multitask
+      # FastEmbed 임베딩 모델 설정
+      EMBEDDING_MODEL: paraphrase-multilingual-mpnet-base-v2
+      FASTEMBED_CACHE_PATH: /app/fastembed_cache
     depends_on:
       postgres:
         condition: service_healthy
@@ -92,6 +93,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./backend/app:/app/app  # 핫 리로드를 위한 볼륨 마운트
+      - ./backend/fastembed_cache:/app/fastembed_cache  # 임베딩 모델 캐시
 
   # 프론트엔드 서비스 (React + Nginx)
   frontend:

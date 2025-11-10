@@ -4,15 +4,12 @@ FROM python:3.11-slim
 # 작업 디렉토리 설정
 WORKDIR /app
 
-# 오프라인 패키지 복사 (프로젝트 루트의 python-packages/)
-COPY python-packages/ /tmp/packages/
-
 # requirements.txt 복사
 COPY backend/requirements.txt .
 
-# 오프라인 패키지로 의존성 설치 (인터넷 연결 없이)
-COPY python-packages/*.whl /tmp/packages/
-RUN python -m pip install --no-index --find-links=/tmp/packages/ /tmp/packages/*.whl \
+# 오프라인 패키지로 의존성 설치 (프로젝트 루트의 python-packages/)
+COPY python-packages/ /tmp/packages/
+RUN pip install --no-index --find-links=/tmp/packages -r requirements.txt \
     && rm -rf /tmp/packages
 
 # 애플리케이션 코드 복사

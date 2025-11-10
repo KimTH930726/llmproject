@@ -30,14 +30,16 @@
 `backend/.env`:
 ```bash
 # 기본 (현재 설정)
-EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-mpnet-base-v2
+EMBEDDING_MODEL=paraphrase-multilingual-mpnet-base-v2
 
 # 경량 모델 (384차원)
-EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L6-v2
+EMBEDDING_MODEL=paraphrase-multilingual-MiniLM-L6-v2
 
 # 고성능 모델 (1024차원)
 EMBEDDING_MODEL=intfloat/multilingual-e5-large
 ```
+
+**주의**: FastEmbed는 `sentence-transformers/` 프리픽스 없이 모델명을 사용합니다.
 
 ### 2단계: qdrant_service.py 수정
 

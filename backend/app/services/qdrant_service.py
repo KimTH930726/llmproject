@@ -19,13 +19,22 @@ class QdrantService:
         self.qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
         self.collection_name = os.getenv("QDRANT_COLLECTION_NAME", "documents")
         # FastEmbed 다국어 모델 (한국어 포함)
-        self.embedding_model_name = os.getenv("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-mpnet-base-v2")
+        self.embedding_model_name = os.getenv("EMBEDDING_MODEL", "paraphrase-multilingual-mpnet-base-v2")
+
+        # FastEmbed 캐시 경로 설정 (폐쇄망 환경)
+        fastembed_cache = os.getenv("FASTEMBED_CACHE_PATH")
+        if fastembed_cache:
+            os.environ["FASTEMBED_CACHE_PATH"] = fastembed_cache
 
         # Qdrant 클라이언트 초기화
         self.client = QdrantClient(url=self.qdrant_url)
 
         # FastEmbed 임베딩 모델 로드 (경량, 다국어 지원)
-        self.embedding_model = TextEmbedding(model_name=self.embedding_model_name)
+        # 캐시 경로가 설정되어 있으면 해당 경로에서 모델 로드
+        self.embedding_model = TextEmbedding(
+            model_name=self.embedding_model_name,
+            cache_dir=fastembed_cache
+        )
         self.vector_size = 768  # paraphrase-multilingual-mpnet-base-v2 벡터 크기
 
         # 컬렉션 생성 (없는 경우)

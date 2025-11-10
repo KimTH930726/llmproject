@@ -80,8 +80,8 @@ npm run dev
 
 | 방식 | 파일 크기 | 폐쇄망 작업 | 권장 상황 |
 |------|----------|-----------|---------|
-| **A. 빌드 이미지 전송** | **870MB** | 이미지 로드만 | 일반적인 경우 (빠름) |
-| B. 베이스+패키지 전송 | 825MB | 빌드 5-10분 | 디버깅/보안검증 필요 시 |
+| **A. 빌드 이미지 전송** | **1.05GB** | 이미지 로드만 | 일반적인 경우 (빠름) |
+| B. 베이스+패키지 전송 | 1.1GB | 빌드 5-10분 | 디버깅/보안검증 필요 시 |
 
 ---
 
@@ -91,24 +91,31 @@ npm run dev
 ```bash
 cd /path/to/llmproject
 
-# Linux AMD64용 빌드 (맥/윈도우도 --platform 필수)
+# 1. FastEmbed 임베딩 모델 다운로드 (백엔드 빌드 전 필수!)
+mkdir -p backend/fastembed_cache
+docker run --rm --platform linux/amd64 \
+  -v $(pwd)/backend/fastembed_cache:/root/.cache/fastembed \
+  python:3.11-slim \
+  bash -c "pip install fastembed==0.3.1 && python -c \"from fastembed import TextEmbedding; TextEmbedding(model_name='paraphrase-multilingual-mpnet-base-v2')\""
+
+# 2. Linux AMD64용 Docker 이미지 빌드 (맥/윈도우도 --platform 필수)
 docker build --platform linux/amd64 -t llmproject-backend:latest -f backend/Dockerfile backend/
 docker build --platform linux/amd64 -t llmproject-frontend:latest -f frontend/Dockerfile frontend/
 
-# 이미지 저장
+# 3. 이미지 저장
 docker save -o llmproject-backend.tar llmproject-backend:latest    # 767MB
 docker save -o llmproject-frontend.tar llmproject-frontend:latest  # 50MB
 
-# 프로젝트 코드 압축
+# 4. 프로젝트 코드 압축 (fastembed_cache 포함!)
 cd ..
 tar -czf llmproject-code.tar.gz \
-  --exclude='llmproject/node_modules' \
+  --exclude='llmproject/frontend/node_modules' \
   --exclude='llmproject/backend/__pycache__' \
   --exclude='llmproject/frontend/dist' \
   --exclude='llmproject/*.tar' \
-  llmproject/                                                        # 50MB
+  llmproject/                                                        # ~250MB (fastembed_cache 포함)
 
-# 총 3개 파일 ~870MB
+# 총 3개 파일 ~1.05GB
 ```
 
 ##### 2단계: 폐쇄망 서버로 전송
@@ -124,24 +131,32 @@ docker load -i llmproject-frontend.tar
 tar -xzf llmproject-code.tar.gz
 cd llmproject
 
-# 환경 변수 설정 (기존 서비스 연결)
+# 환경 변수 설정 (기존 서비스 연결 + FastEmbed 캐시 경로)
 cat > backend/.env << 'EOF'
 DATABASE_URL=postgresql://admin:admin123@postgres-container:5432/applicants_db
 OLLAMA_BASE_URL=http://ollama-container:11434
 OLLAMA_MODEL=llama3.2:1b
 QDRANT_URL=http://qdrant-container:6333
+FASTEMBED_CACHE_PATH=/app/fastembed_cache
 EOF
 
-# docker-compose.yml 수정 (build → image)
-# vi docker-compose.yml에서 다음과 같이 수정:
+# docker-compose.yml 수정 (build → image로 변경)
+vi docker-compose.yml
+# 각 서비스에서 다음과 같이 수정:
 #
 # backend:
-#   image: llmproject-backend:latest  # 추가
-#   # build: ...  # 주석 처리
+#   # build:              # ← 이 3줄 주석 처리
+#   #   context: .
+#   #   dockerfile: backend/Dockerfile.offline
+#   image: llmproject-backend:latest  # ← 주석 해제
+#   volumes:
+#     - ./backend/fastembed_cache:/app/fastembed_cache  # 이미 설정됨
 #
 # frontend:
-#   image: llmproject-frontend:latest  # 추가
-#   # build: ...  # 주석 처리
+#   # build:              # ← 이 3줄 주석 처리
+#   #   context: ./frontend
+#   #   dockerfile: Dockerfile.offline
+#   image: llmproject-frontend:latest  # ← 주석 해제
 
 # 실행
 docker-compose up -d
@@ -150,6 +165,9 @@ docker-compose up -d
 docker-compose logs -f backend
 curl http://localhost:8000/docs  # Backend API
 curl http://localhost/           # Frontend
+
+# 임베딩 모델 로드 확인
+docker logs backend 2>&1 | grep -i "fastembed\|embedding"
 ```
 
 ---
@@ -160,13 +178,15 @@ curl http://localhost/           # Frontend
 ```bash
 cd /path/to/llmproject
 
-# 베이스 이미지 다운로드
+# 1. 베이스 이미지 다운로드
 docker pull --platform linux/amd64 python:3.11-slim
 docker pull --platform linux/amd64 nginx:alpine
+docker pull --platform linux/amd64 node:20-alpine
 docker save -o python-3.11-slim.tar python:3.11-slim
 docker save -o nginx-alpine.tar nginx:alpine
+docker save -o node-20-alpine.tar node:20-alpine
 
-# Python 패키지 다운로드
+# 2. Python 패키지 다운로드
 mkdir -p python-packages
 docker run --rm --platform linux/amd64 \
   -v $(pwd)/backend:/workspace/backend \
@@ -175,9 +195,24 @@ docker run --rm --platform linux/amd64 \
   python:3.11-slim \
   pip download -r requirements.txt -d /workspace/python-packages/
 
-# 압축
+# 3. FastEmbed 임베딩 모델 다운로드
+mkdir -p backend/fastembed_cache
+docker run --rm --platform linux/amd64 \
+  -v $(pwd)/backend/fastembed_cache:/root/.cache/fastembed \
+  -v $(pwd)/python-packages:/packages \
+  python:3.11-slim \
+  bash -c "pip install --no-index --find-links=/packages fastembed && python -c \"from fastembed import TextEmbedding; TextEmbedding(model_name='paraphrase-multilingual-mpnet-base-v2')\""
+
+# 4. 프론트엔드 node_modules 다운로드
+docker run --rm --platform linux/amd64 \
+  -v $(pwd)/frontend:/workspace \
+  -w /workspace \
+  node:20-alpine \
+  npm install
+
+# 5. 압축 (node_modules, python-packages, fastembed_cache 포함)
 cd ..
-tar -czf llmproject-full.tar.gz llmproject/  # ~825MB (python-packages 압축)
+tar -czf llmproject-full.tar.gz llmproject/  # ~1.1GB
 ```
 
 ##### 2단계: 폐쇄망 서버로 전송
@@ -192,6 +227,7 @@ cd llmproject
 # 베이스 이미지 로드
 docker load -i python-3.11-slim.tar
 docker load -i nginx-alpine.tar
+docker load -i node-20-alpine.tar
 
 # 환경 변수 설정
 cat > backend/.env << 'EOF'
@@ -199,13 +235,25 @@ DATABASE_URL=postgresql://admin:admin123@postgres-container:5432/applicants_db
 OLLAMA_BASE_URL=http://ollama-container:11434
 OLLAMA_MODEL=llama3.2:1b
 QDRANT_URL=http://qdrant-container:6333
+FASTEMBED_CACHE_PATH=/app/fastembed_cache
 EOF
 
-# 빌드 및 실행 (폐쇄망에서 python-packages로 설치)
+# docker-compose.yml 확인 (방식 B는 build 사용)
+# backend: dockerfile: backend/Dockerfile.offline
+# frontend: dockerfile: Dockerfile.offline (node_modules 사전 다운로드 활용)
+
+# .dockerignore 임시 백업 (frontend/node_modules 복사 허용)
+mv frontend/.dockerignore frontend/.dockerignore.bak
+
+# 빌드 및 실행 (폐쇄망에서 로컬 패키지로 설치)
 docker-compose up -d --build
+
+# .dockerignore 복원
+mv frontend/.dockerignore.bak frontend/.dockerignore
 
 # 확인
 docker-compose logs -f backend
+docker logs backend 2>&1 | grep -i "fastembed\|embedding"
 ```
 
 ---
@@ -389,7 +437,7 @@ query_logs 자동 저장 (추후 Few-shot 승격 가능)
 **선택:**
 - `DB_SCHEMA`: `public` (default)
 - `QDRANT_COLLECTION_NAME`: `documents` (default)
-- `EMBEDDING_MODEL`: `jhgan/ko-sroberta-multitask` (default)
+- `EMBEDDING_MODEL`: `paraphrase-multilingual-mpnet-base-v2` (default)
 
 ## API Endpoints
 
@@ -568,7 +616,7 @@ docker exec postgres psql -U admin -d applicants_db -c "SELECT id, intent_type, 
 - **No Auto-Migration**: FastAPI는 테이블 생성 안 함 (폐쇄망 서버는 `init.sql` 사전 실행 필요)
 - **Manual Few-shot Curation**: Query logs → 관리 UI 검토 → 승격 버튼 → Few-shots
 - **Audit Trail**: PostgreSQL 트리거 `log_few_shot_audit()`로 Few-shot 변경 이력 자동 기록
-- **Korean LLM**: 모든 프롬프트는 한국어로 하드코딩 (임베딩: `jhgan/ko-sroberta-multitask`)
+- **Korean LLM**: 모든 프롬프트는 한국어로 하드코딩 (임베딩: `paraphrase-multilingual-mpnet-base-v2`)
 - **Offline Build**: `Dockerfile.offline` + `python-packages/` 디렉토리 사용
 - **No Heavy Frameworks**: LangChain 없음 (커스텀 RAG), Alembic 없음 (SQL 마이그레이션 수동)
 
