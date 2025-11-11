@@ -111,7 +111,8 @@ services:
 
 networks:
   dev-network:
-    driver: bridge
+    name: llmproject-backend
+    external: true
 
 volumes:
   postgres_data:

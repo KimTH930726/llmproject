@@ -52,4 +52,5 @@ services:
 
 networks:
   app-network:
-    driver: bridge
+    name: llmproject-backend
+    external: true
