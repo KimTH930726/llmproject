@@ -19,9 +19,9 @@ services:
     # 위 build 섹션 주석 처리하고 아래 주석 해제:
     # image: llmproject-backend:latest
 
-    container_name: backend
+    container_name: llmproject-backend-kth
     ports:
-      - "8000:8000"
+      - "1043:8000"
     env_file:
       - ./backend/.env  # .env 파일에서 환경 변수 로드
     volumes:
@@ -41,9 +41,9 @@ services:
     # 위 build 섹션 주석 처리하고 아래 주석 해제:
     # image: llmproject-frontend:latest
 
-    container_name: frontend
+    container_name: llmproject-backend-kth
     ports:
-      - "80:80"
+      - "1044:80"
     depends_on:
       - backend
     networks:
