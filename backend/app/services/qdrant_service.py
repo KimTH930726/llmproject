@@ -11,6 +11,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# 오프라인 모드 강제 (폐쇄망 환경에서 HuggingFace Hub 접속 차단)
+# 반드시 TextEmbedding import 전에 설정되어야 함
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_DATASETS_OFFLINE"] = "1"
+
 
 class QdrantService:
     """Qdrant 벡터 DB와 임베딩 모델을 관리하는 서비스"""
@@ -23,11 +29,6 @@ class QdrantService:
 
         # FastEmbed 캐시 경로 설정 (폐쇄망 환경)
         fastembed_cache = os.getenv("FASTEMBED_CACHE_PATH", "/app/fastembed_cache")
-
-        # 오프라인 모드 강제 (폐쇄망 환경에서 HuggingFace Hub 접속 차단)
-        os.environ["HF_HUB_OFFLINE"] = "1"
-        os.environ["TRANSFORMERS_OFFLINE"] = "1"
-        os.environ["HF_DATASETS_OFFLINE"] = "1"
 
         # Qdrant 클라이언트 초기화
         self.client = QdrantClient(url=self.qdrant_url)
