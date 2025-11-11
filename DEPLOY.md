@@ -244,12 +244,15 @@ docker network inspect <network-name>
 
 서버의 PostgreSQL에 필요한 테이블을 생성합니다.
 
-```bash
-# 서버의 PostgreSQL 컨테이너에 접속
-docker exec -it postgres-container-name psql -U admin -d applicants_db
+### 1. init.sql 실행 (최초 1회)
 
-# 또는 init.sql 파일 실행
+```bash
+# 방법 1: init.sql 파일 직접 실행 (권장)
 docker exec -i postgres-container-name psql -U admin -d applicants_db < init.sql
+
+# 방법 2: PostgreSQL 컨테이너에서 대화형으로 실행
+docker exec -it postgres-container-name psql -U admin -d applicants_db
+applicants_db=# \i /path/to/init.sql
 ```
 
 **주요 테이블 (init.sql 참고):**
@@ -258,6 +261,91 @@ docker exec -i postgres-container-name psql -U admin -d applicants_db < init.sql
 - `query_logs`: 질의 로그 자동 저장
 - `few_shots`: Few-shot 예제
 - `few_shot_audit`: 변경 이력 (트리거 자동 생성)
+
+### 2. 트리거 설치 확인 (필수!)
+
+**Few-shot Audit 트리거가 설치되었는지 반드시 확인하세요.**
+
+```bash
+# PostgreSQL 접속
+docker exec -it postgres-container-name psql -U admin -d applicants_db
+
+# 트리거 존재 확인
+SELECT trigger_name, event_manipulation, event_object_table
+FROM information_schema.triggers
+WHERE event_object_table = 'few_shots';
+```
+
+**기대 출력:**
+```
+       trigger_name        | event_manipulation | event_object_table
+---------------------------+--------------------+--------------------
+ few_shot_audit_trigger    | INSERT             | few_shots
+ few_shot_audit_trigger    | UPDATE             | few_shots
+ few_shot_audit_trigger    | DELETE             | few_shots
+(3 rows)
+```
+
+**만약 출력이 비어있으면 (트리거 없음):**
+```bash
+# init.sql의 트리거 부분만 재실행
+docker exec -it postgres-container-name psql -U admin -d applicants_db << 'EOF'
+-- 트리거 함수 생성
+CREATE OR REPLACE FUNCTION log_few_shot_audit()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF (TG_OP = 'DELETE') THEN
+        INSERT INTO few_shot_audit (few_shot_id, action, old_value, changed_by)
+        VALUES (OLD.id, 'DELETE', row_to_json(OLD), 'system');
+        RETURN OLD;
+    ELSIF (TG_OP = 'UPDATE') THEN
+        INSERT INTO few_shot_audit (few_shot_id, action, old_value, new_value, changed_by)
+        VALUES (NEW.id, 'UPDATE', row_to_json(OLD), row_to_json(NEW), 'system');
+        RETURN NEW;
+    ELSIF (TG_OP = 'INSERT') THEN
+        INSERT INTO few_shot_audit (few_shot_id, action, new_value, changed_by)
+        VALUES (NEW.id, 'INSERT', row_to_json(NEW), 'system');
+        RETURN NEW;
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 트리거 생성
+DROP TRIGGER IF EXISTS few_shot_audit_trigger ON few_shots;
+CREATE TRIGGER few_shot_audit_trigger
+    AFTER INSERT OR UPDATE OR DELETE ON few_shots
+    FOR EACH ROW
+    EXECUTE FUNCTION log_few_shot_audit();
+EOF
+```
+
+### 3. 트리거 작동 테스트 (권장)
+
+```sql
+-- 1. 테스트 Few-shot 생성
+INSERT INTO few_shots (intent_type, user_query, expected_response, is_active)
+VALUES ('test', '테스트 질문', '테스트 답변', true)
+RETURNING id;
+
+-- 2. Audit 테이블 확인 (방금 생성한 ID로 확인)
+SELECT few_shot_id, action, created_at
+FROM few_shot_audit
+WHERE few_shot_id = <방금_생성된_ID>
+ORDER BY created_at DESC;
+
+-- 3. 테스트 데이터 삭제
+DELETE FROM few_shots WHERE intent_type = 'test';
+
+-- 4. 최종 확인: DELETE 액션도 기록되었는지 확인
+SELECT few_shot_id, action, created_at
+FROM few_shot_audit
+WHERE few_shot_id = <방금_생성된_ID>
+ORDER BY created_at DESC;
+-- INSERT와 DELETE 두 레코드가 보여야 함
+```
+
+**⚠️ 중요:** 트리거가 없으면 Few-shot 변경 이력이 절대 기록되지 않습니다!
 
 ---
 
@@ -437,6 +525,7 @@ services:
 **사전 확인:**
 - [ ] PostgreSQL, Ollama, Qdrant 실행 중
 - [ ] init.sql로 테이블 생성 완료
+- [ ] **Few-shot Audit 트리거 설치 확인 (필수!)** ← 위 섹션 참고
 - [ ] 네트워크 이름/컨테이너명 확인
 - [ ] FastEmbed 캐시 디렉토리 존재 확인
 
@@ -452,6 +541,11 @@ docker logs frontend --tail 50
 
 # FastEmbed 모델 로드 확인
 docker logs backend 2>&1 | grep "FastEmbed"
+
+# 트리거 작동 확인 (중요!)
+docker exec -it postgres-container-name psql -U admin -d applicants_db \
+  -c "SELECT trigger_name FROM information_schema.triggers WHERE event_object_table = 'few_shots';"
+# ↑ 3개 출력되어야 함 (INSERT, UPDATE, DELETE)
 ```
 
 ### FastEmbed 캐시 구조

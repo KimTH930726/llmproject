@@ -2,7 +2,8 @@
 파일에서 텍스트를 추출하는 유틸리티
 지원 형식: PDF, DOCX, TXT, XLSX
 """
-from typing import BinaryIO
+from typing import BinaryIO, Union
+from io import BytesIO
 import PyPDF2
 from docx import Document
 import openpyxl
@@ -12,9 +13,13 @@ class TextExtractor:
     """파일 형식에 따라 텍스트를 추출하는 클래스"""
 
     @staticmethod
-    def extract_from_pdf(file: BinaryIO) -> str:
+    def extract_from_pdf(file: Union[BinaryIO, bytes]) -> str:
         """PDF 파일에서 텍스트 추출"""
         try:
+            # bytes인 경우 BytesIO로 변환
+            if isinstance(file, bytes):
+                file = BytesIO(file)
+
             pdf_reader = PyPDF2.PdfReader(file)
             text = ""
             for page in pdf_reader.pages:
@@ -24,9 +29,13 @@ class TextExtractor:
             raise ValueError(f"PDF 텍스트 추출 실패: {str(e)}")
 
     @staticmethod
-    def extract_from_docx(file: BinaryIO) -> str:
+    def extract_from_docx(file: Union[BinaryIO, bytes]) -> str:
         """DOCX 파일에서 텍스트 추출"""
         try:
+            # bytes인 경우 BytesIO로 변환
+            if isinstance(file, bytes):
+                file = BytesIO(file)
+
             doc = Document(file)
             text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
             return text.strip()
@@ -37,7 +46,12 @@ class TextExtractor:
     def extract_from_txt(file: BinaryIO) -> str:
         """TXT 파일에서 텍스트 추출"""
         try:
-            content = file.read()
+            # file이 이미 bytes인 경우 처리
+            if isinstance(file, bytes):
+                content = file
+            else:
+                content = file.read()
+
             # UTF-8로 시도, 실패하면 CP949(한글 윈도우)로 시도
             try:
                 return content.decode('utf-8').strip()
@@ -47,9 +61,13 @@ class TextExtractor:
             raise ValueError(f"TXT 텍스트 추출 실패: {str(e)}")
 
     @staticmethod
-    def extract_from_xlsx(file: BinaryIO) -> str:
+    def extract_from_xlsx(file: Union[BinaryIO, bytes]) -> str:
         """XLSX 파일에서 텍스트 추출 (모든 시트의 셀 내용)"""
         try:
+            # bytes인 경우 BytesIO로 변환
+            if isinstance(file, bytes):
+                file = BytesIO(file)
+
             workbook = openpyxl.load_workbook(file)
             text = ""
             for sheet in workbook.worksheets:
@@ -62,7 +80,7 @@ class TextExtractor:
             raise ValueError(f"XLSX 텍스트 추출 실패: {str(e)}")
 
     @classmethod
-    def extract_text(cls, file: BinaryIO, filename: str) -> str:
+    def extract_text(cls, file: Union[BinaryIO, bytes], filename: str) -> str:
         """
         파일 확장자에 따라 적절한 추출 메서드를 호출
 

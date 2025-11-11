@@ -208,13 +208,40 @@ class QdrantService:
         Returns:
             컬렉션 통계 정보
         """
-        collection_info = self.client.get_collection(self.collection_name)
-        return {
-            "name": self.collection_name,
-            "points_count": collection_info.points_count,
-            "vector_size": collection_info.config.params.vectors.size,
-            "distance": collection_info.config.params.vectors.distance.name
-        }
+        try:
+            collection_info = self.client.get_collection(self.collection_name)
+
+            # Qdrant 버전에 따라 응답 구조가 다를 수 있으므로 안전하게 접근
+            try:
+                # 최신 버전 (config.params.vectors가 VectorParams 객체)
+                vector_params = collection_info.config.params.vectors
+                if hasattr(vector_params, 'size'):
+                    vector_size = vector_params.size
+                    distance = vector_params.distance.name if hasattr(vector_params.distance, 'name') else str(vector_params.distance)
+                else:
+                    # 딕셔너리 형태인 경우
+                    vector_size = vector_params.get('size', self.vector_size)
+                    distance = vector_params.get('distance', 'COSINE')
+            except (AttributeError, TypeError):
+                # fallback: 기본값 사용
+                vector_size = self.vector_size
+                distance = "COSINE"
+
+            return {
+                "name": self.collection_name,
+                "points_count": collection_info.points_count or 0,
+                "vector_size": vector_size,
+                "distance": distance
+            }
+        except Exception as e:
+            # 컬렉션 정보 조회 실패 시 기본 정보 반환
+            return {
+                "name": self.collection_name,
+                "points_count": 0,
+                "vector_size": self.vector_size,
+                "distance": "COSINE",
+                "error": str(e)
+            }
 
 
 # 싱글톤 인스턴스

@@ -247,16 +247,16 @@ export default function QueryLogManagement() {
           <p className="mt-4 text-blue-600 font-semibold">로딩 중...</p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl shadow-lg border border-blue-200">
-          <table className="min-w-full bg-white">
+        <div className="overflow-x-auto rounded-xl shadow-lg border border-blue-200">
+          <table className="w-full bg-white table-fixed">
             <thead className="bg-gradient-to-r from-blue-600 to-blue-700 text-white">
               <tr>
-                <th className="px-6 py-4 text-left font-bold text-sm">ID</th>
-                <th className="px-6 py-4 text-left font-bold text-sm">질의 텍스트</th>
-                <th className="px-6 py-4 text-left font-bold text-sm">의도</th>
-                <th className="px-6 py-4 text-center font-bold text-sm">Few-shot 변환</th>
-                <th className="px-6 py-4 text-left font-bold text-sm">생성일</th>
-                <th className="px-6 py-4 text-center font-bold text-sm">작업</th>
+                <th className="w-16 px-4 py-4 text-left font-bold text-sm">ID</th>
+                <th className="w-96 px-4 py-4 text-left font-bold text-sm">질의 텍스트</th>
+                <th className="w-24 px-4 py-4 text-left font-bold text-sm">의도</th>
+                <th className="w-28 px-4 py-4 text-center font-bold text-sm">Few-shot 변환</th>
+                <th className="w-40 px-4 py-4 text-left font-bold text-sm">생성일</th>
+                <th className="w-36 px-4 py-4 text-center font-bold text-sm">작업</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-blue-100">
@@ -270,48 +270,50 @@ export default function QueryLogManagement() {
               ) : (
                 queryLogs.map((log) => (
                   <tr key={log.id} className="hover:bg-blue-50 transition-colors duration-150">
-                    <td className="px-6 py-4 text-gray-700 font-medium">{log.id}</td>
-                    <td className="px-6 py-4 max-w-lg">
-                      <div className="text-blue-800 font-medium line-clamp-2">{log.query_text}</div>
+                    <td className="px-4 py-4 text-gray-700 font-medium text-sm">{log.id}</td>
+                    <td className="px-4 py-4">
+                      <div className="text-blue-800 font-medium text-sm break-words">{log.query_text}</div>
                       {log.response && (
-                        <div className="text-xs text-gray-500 mt-1 line-clamp-1">
+                        <div className="text-xs text-gray-500 mt-1 break-words line-clamp-2">
                           응답: {log.response}
                         </div>
                       )}
                     </td>
-                    <td className="px-6 py-4">
-                      <span className={`px-3 py-1.5 rounded-full text-xs font-semibold ${getIntentBadgeColor(log.detected_intent)}`}>
+                    <td className="px-4 py-4">
+                      <span className={`px-2 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${getIntentBadgeColor(log.detected_intent)}`}>
                         {log.detected_intent || '미분류'}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-center">
+                    <td className="px-4 py-4 text-center">
                       {log.is_converted_to_fewshot ? (
-                        <span className="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-green-100 text-green-800">
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 whitespace-nowrap">
                           ✓ 변환됨
                         </span>
                       ) : (
-                        <span className="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-gray-200 text-gray-600">
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-gray-200 text-gray-600 whitespace-nowrap">
                           ○ 미변환
                         </span>
                       )}
                     </td>
-                    <td className="px-6 py-4 text-gray-600 text-sm">
+                    <td className="px-4 py-4 text-gray-600 text-xs whitespace-nowrap">
                       {new Date(log.created_at).toLocaleString('ko-KR')}
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-4 py-4">
                       <div className="flex gap-2 justify-center">
-                        {!log.is_converted_to_fewshot && (
-                          <button
-                            onClick={() => openConvertModal(log)}
-                            className="px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg hover:from-green-600 hover:to-green-700 font-medium shadow-sm transition-all duration-200 hover:shadow-md hover:scale-105"
-                          >
-                            ⬆ 승격
-                          </button>
-                        )}
+                        <button
+                          onClick={() => openConvertModal(log)}
+                          disabled={log.is_converted_to_fewshot}
+                          className={`px-3 py-1.5 rounded-lg font-medium shadow-sm transition-all duration-200 text-xs whitespace-nowrap ${
+                            log.is_converted_to_fewshot
+                              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                              : 'bg-gradient-to-r from-green-500 to-green-600 text-white hover:from-green-600 hover:to-green-700 hover:shadow-md hover:scale-105'
+                          }`}
+                        >
+                          ⬆ 승격
+                        </button>
                         <button
                           onClick={() => handleDelete(log.id)}
-                          className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 font-medium shadow-sm transition-all duration-200 hover:shadow-md hover:scale-105"
-                          disabled={log.is_converted_to_fewshot}
+                          className="px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 font-medium shadow-sm transition-all duration-200 hover:shadow-md hover:scale-105 text-xs whitespace-nowrap"
                         >
                           삭제
                         </button>
@@ -327,15 +329,15 @@ export default function QueryLogManagement() {
 
       {/* Few-shot 승격 모달 */}
       {showConvertModal && selectedLog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 p-4 pt-20 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8 my-8">
             <h3 className="text-2xl font-bold text-blue-800 border-b-2 border-blue-300 pb-3 mb-6">
               ⬆ Few-shot 예제로 승격
             </h3>
-            <div className="space-y-4">
+            <div className="space-y-5">
               <div>
                 <label className="block text-sm font-semibold text-blue-900 mb-2">질의 텍스트</label>
-                <div className="p-4 bg-blue-50 rounded-lg border border-blue-200 text-blue-800">
+                <div className="p-4 bg-blue-50 rounded-lg border border-blue-200 text-blue-800 break-words">
                   {selectedLog.query_text}
                 </div>
               </div>
@@ -344,7 +346,7 @@ export default function QueryLogManagement() {
                 <select
                   value={convertForm.intent_type}
                   onChange={(e) => setConvertForm({ ...convertForm, intent_type: e.target.value })}
-                  className="w-full px-4 py-3 border-2 border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-3 border-2 border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                 >
                   <option value="">선택 안 함</option>
                   <option value="rag_search">RAG 검색</option>
@@ -353,13 +355,13 @@ export default function QueryLogManagement() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-semibold text-blue-900 mb-2">예상 응답</label>
+                <label className="block text-sm font-semibold text-blue-900 mb-2">예상 응답 (선택사항)</label>
                 <textarea
                   value={convertForm.expected_response}
                   onChange={(e) => setConvertForm({ ...convertForm, expected_response: e.target.value })}
-                  className="w-full px-4 py-3 border-2 border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  rows={4}
-                  placeholder="예상 응답 (선택사항)"
+                  className="w-full px-4 py-3 border-2 border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white resize-none"
+                  rows={6}
+                  placeholder="LLM이 제공해야 할 이상적인 응답을 입력하세요..."
                 />
               </div>
               <div className="flex items-center gap-3 bg-blue-50 p-4 rounded-lg border border-blue-200">
@@ -368,23 +370,23 @@ export default function QueryLogManagement() {
                   id="convert_is_active"
                   checked={convertForm.is_active}
                   onChange={(e) => setConvertForm({ ...convertForm, is_active: e.target.checked })}
-                  className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                  className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500 cursor-pointer"
                 />
-                <label htmlFor="convert_is_active" className="text-sm font-semibold text-blue-900">
-                  ✓ 활성화 (프롬프트에 포함)
+                <label htmlFor="convert_is_active" className="text-sm font-semibold text-blue-900 cursor-pointer">
+                  ✓ 활성화 (프롬프트에 즉시 포함)
                 </label>
               </div>
             </div>
-            <div className="flex gap-3 mt-6">
+            <div className="flex gap-3 mt-8">
               <button
                 onClick={handleConvertToFewShot}
-                className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 font-semibold shadow-md transition-all duration-200 hover:shadow-lg"
+                className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 font-semibold shadow-md transition-all duration-200 hover:shadow-lg transform hover:scale-105"
               >
                 승격하기
               </button>
               <button
                 onClick={() => setShowConvertModal(false)}
-                className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-semibold shadow-md transition-all duration-200"
+                className="px-8 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-semibold shadow-md transition-all duration-200 transform hover:scale-105"
               >
                 취소
               </button>
