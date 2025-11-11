@@ -393,6 +393,7 @@ export default function QueryLogManagement() {
               </button>
             </div>
           </div>
+          </div>
         </div>
       )}
     </div>
