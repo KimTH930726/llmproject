@@ -17,7 +17,8 @@ interface IntentFormData {
   description: string;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+// Nginx reverse proxy 사용 - 상대 경로로 호출 (폐쇄망 환경)
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 const INTENT_TYPES = [
   { value: 'rag_search', label: 'RAG 검색', icon: '🔍', color: 'bg-blue-100 text-blue-700' },

@@ -24,7 +24,8 @@ interface DocumentsResponse {
   documents: Document[];
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+// Nginx reverse proxy 사용 - 상대 경로로 호출 (폐쇄망 환경)
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 export default function Dashboard() {
   const [collectionInfo, setCollectionInfo] = useState<CollectionInfo | null>(null);
