@@ -10,10 +10,15 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# CORS 설정
+# CORS 설정 (폐쇄망 환경 대응)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost"],  # Vite, Nginx
+    allow_origins=[
+        "http://localhost:5173",  # Vite 개발 서버
+        "http://localhost",       # Nginx (포트 80)
+        "http://localhost:80",    # Nginx 명시적 포트
+        "*"                       # 폐쇄망 환경에서 IP 접근 허용
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
