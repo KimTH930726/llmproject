@@ -239,8 +239,9 @@ export default function IntentManagement() {
 
       {/* Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8">
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 overflow-y-auto">
+          <div className="min-h-screen flex items-start justify-center p-4 pt-12">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8 my-8">
             <form onSubmit={editingIntent ? handleUpdate : handleCreate}>
               {/* Modal Header */}
               <div className="flex items-center justify-between border-b-2 border-blue-300 pb-3 mb-6">
@@ -341,6 +342,7 @@ export default function IntentManagement() {
                 </button>
               </div>
             </form>
+            </div>
           </div>
         </div>
       )}

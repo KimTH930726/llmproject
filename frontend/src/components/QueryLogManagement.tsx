@@ -248,15 +248,15 @@ export default function QueryLogManagement() {
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl shadow-lg border border-blue-200">
-          <table className="w-full bg-white table-fixed">
+          <table className="min-w-full bg-white">
             <thead className="bg-gradient-to-r from-blue-600 to-blue-700 text-white">
               <tr>
-                <th className="w-16 px-4 py-4 text-left font-bold text-sm">ID</th>
-                <th className="w-96 px-4 py-4 text-left font-bold text-sm">질의 텍스트</th>
-                <th className="w-24 px-4 py-4 text-left font-bold text-sm">의도</th>
-                <th className="w-28 px-4 py-4 text-center font-bold text-sm">Few-shot 변환</th>
-                <th className="w-40 px-4 py-4 text-left font-bold text-sm">생성일</th>
-                <th className="w-36 px-4 py-4 text-center font-bold text-sm">작업</th>
+                <th className="px-4 py-4 text-left font-bold text-sm" style={{width: '60px'}}>ID</th>
+                <th className="px-4 py-4 text-left font-bold text-sm" style={{minWidth: '500px'}}>질의 텍스트</th>
+                <th className="px-4 py-4 text-left font-bold text-sm" style={{width: '100px'}}>의도</th>
+                <th className="px-4 py-4 text-center font-bold text-sm" style={{width: '120px'}}>Few-shot 변환</th>
+                <th className="px-4 py-4 text-left font-bold text-sm" style={{width: '180px'}}>생성일</th>
+                <th className="px-4 py-4 text-center font-bold text-sm" style={{width: '180px'}}>작업</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-blue-100">
@@ -329,8 +329,9 @@ export default function QueryLogManagement() {
 
       {/* Few-shot 승격 모달 */}
       {showConvertModal && selectedLog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 p-4 pt-20 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8 my-8">
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 overflow-y-auto">
+          <div className="min-h-screen flex items-start justify-center p-4 pt-12">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8 my-8">
             <h3 className="text-2xl font-bold text-blue-800 border-b-2 border-blue-300 pb-3 mb-6">
               ⬆ Few-shot 예제로 승격
             </h3>

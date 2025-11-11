@@ -140,8 +140,12 @@ class QdrantService:
 
     def count_documents(self) -> int:
         """저장된 문서 개수 반환"""
-        collection_info = self.client.get_collection(self.collection_name)
-        return collection_info.points_count
+        try:
+            collection_info = self.client.get_collection(self.collection_name)
+            return collection_info.points_count or 0
+        except Exception:
+            # 에러 발생 시 0 반환 (컬렉션 없음 or 접근 불가)
+            return 0
 
     def get_all_documents(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
         """
@@ -154,25 +158,29 @@ class QdrantService:
         Returns:
             문서 리스트 (각 문서는 id, text, metadata 포함)
         """
-        # Qdrant scroll API로 문서 조회
-        scroll_result = self.client.scroll(
-            collection_name=self.collection_name,
-            limit=limit,
-            offset=offset,
-            with_payload=True,
-            with_vectors=False  # 벡터는 불필요 (용량 절약)
-        )
+        try:
+            # Qdrant scroll API로 문서 조회
+            scroll_result = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=limit,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False  # 벡터는 불필요 (용량 절약)
+            )
 
-        documents = []
-        for point in scroll_result[0]:  # scroll_result는 (points, next_offset) 튜플
-            doc = {
-                "id": str(point.id),
-                "text": point.payload.get("text", ""),
-                "metadata": {k: v for k, v in point.payload.items() if k != "text"}
-            }
-            documents.append(doc)
+            documents = []
+            for point in scroll_result[0]:  # scroll_result는 (points, next_offset) 튜플
+                doc = {
+                    "id": str(point.id),
+                    "text": point.payload.get("text", ""),
+                    "metadata": {k: v for k, v in point.payload.items() if k != "text"}
+                }
+                documents.append(doc)
 
-        return documents
+            return documents
+        except Exception:
+            # 에러 발생 시 빈 리스트 반환 (컬렉션 없음 or 접근 불가)
+            return []
 
     def get_document_by_id(self, doc_id: str) -> Dict[str, Any]:
         """
