@@ -34,13 +34,6 @@ export default function QueryLogManagement() {
   const [filterIntent, setFilterIntent] = useState<string>('');
   const [convertedOnly, setConvertedOnly] = useState(false);
   const [searchText, setSearchText] = useState('');
-  const [selectedLog, setSelectedLog] = useState<QueryLog | null>(null);
-  const [showConvertModal, setShowConvertModal] = useState(false);
-  const [convertForm, setConvertForm] = useState({
-    intent_type: '',
-    expected_response: '',
-    is_active: true,
-  });
 
   const fetchQueryLogs = async () => {
     setLoading(true);
@@ -83,36 +76,30 @@ export default function QueryLogManagement() {
     fetchQueryLogs();
   };
 
-  const openConvertModal = (log: QueryLog) => {
-    setSelectedLog(log);
-    setConvertForm({
-      intent_type: log.detected_intent || '',
-      expected_response: log.response || '',
-      is_active: true,
-    });
-    setShowConvertModal(true);
-  };
+  const handleConvertToFewShot = async (log: QueryLog) => {
+    if (!confirm(`질의 로그를 Few-shot 예제로 승격하시겠습니까?\n\n질의: ${log.query_text}`)) {
+      return;
+    }
 
-  const handleConvertToFewShot = async () => {
-    if (!selectedLog) return;
     setError(null);
     try {
       const response = await fetch(`${API_BASE_URL}/api/query-logs/convert-to-fewshot`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          query_log_id: selectedLog.id,
-          ...convertForm,
+          query_log_id: log.id,
+          intent_type: log.detected_intent || '',
+          expected_response: log.response || '',
+          is_active: true,
         }),
       });
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to convert to few-shot');
       }
+      alert('Few-shot 예제로 승격되었습니다.');
       await fetchQueryLogs();
       await fetchStats();
-      setShowConvertModal(false);
-      setSelectedLog(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     }
@@ -301,7 +288,7 @@ export default function QueryLogManagement() {
                     <td className="px-4 py-4">
                       <div className="flex gap-2 justify-center">
                         <button
-                          onClick={() => openConvertModal(log)}
+                          onClick={() => handleConvertToFewShot(log)}
                           disabled={log.is_converted_to_fewshot}
                           className={`px-3 py-1.5 rounded-lg font-medium shadow-sm transition-all duration-200 text-xs whitespace-nowrap ${
                             log.is_converted_to_fewshot
@@ -327,75 +314,6 @@ export default function QueryLogManagement() {
         </div>
       )}
 
-      {/* Few-shot 승격 모달 */}
-      {showConvertModal && selectedLog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 overflow-y-auto">
-          <div className="min-h-screen flex items-start justify-center p-4 pt-12">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8 my-8">
-            <h3 className="text-2xl font-bold text-blue-800 border-b-2 border-blue-300 pb-3 mb-6">
-              ⬆ Few-shot 예제로 승격
-            </h3>
-            <div className="space-y-5">
-              <div>
-                <label className="block text-sm font-semibold text-blue-900 mb-2">질의 텍스트</label>
-                <div className="p-4 bg-blue-50 rounded-lg border border-blue-200 text-blue-800 break-words">
-                  {selectedLog.query_text}
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-blue-900 mb-2">Intent 타입</label>
-                <select
-                  value={convertForm.intent_type}
-                  onChange={(e) => setConvertForm({ ...convertForm, intent_type: e.target.value })}
-                  className="w-full px-4 py-3 border-2 border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                >
-                  <option value="">선택 안 함</option>
-                  <option value="rag_search">RAG 검색</option>
-                  <option value="sql_query">SQL 쿼리</option>
-                  <option value="general">일반 대화</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-blue-900 mb-2">예상 응답 (선택사항)</label>
-                <textarea
-                  value={convertForm.expected_response}
-                  onChange={(e) => setConvertForm({ ...convertForm, expected_response: e.target.value })}
-                  className="w-full px-4 py-3 border-2 border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white resize-none"
-                  rows={6}
-                  placeholder="LLM이 제공해야 할 이상적인 응답을 입력하세요..."
-                />
-              </div>
-              <div className="flex items-center gap-3 bg-blue-50 p-4 rounded-lg border border-blue-200">
-                <input
-                  type="checkbox"
-                  id="convert_is_active"
-                  checked={convertForm.is_active}
-                  onChange={(e) => setConvertForm({ ...convertForm, is_active: e.target.checked })}
-                  className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                />
-                <label htmlFor="convert_is_active" className="text-sm font-semibold text-blue-900 cursor-pointer">
-                  ✓ 활성화 (프롬프트에 즉시 포함)
-                </label>
-              </div>
-            </div>
-            <div className="flex gap-3 mt-8">
-              <button
-                onClick={handleConvertToFewShot}
-                className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 font-semibold shadow-md transition-all duration-200 hover:shadow-lg transform hover:scale-105"
-              >
-                승격하기
-              </button>
-              <button
-                onClick={() => setShowConvertModal(false)}
-                className="px-8 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-semibold shadow-md transition-all duration-200 transform hover:scale-105"
-              >
-                취소
-              </button>
-            </div>
-          </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
