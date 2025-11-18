@@ -10,6 +10,21 @@ class ChatRequest(BaseModel):
     query: str
 
 
+class QueryDecomposition(BaseModel):
+    """질의 분해 결과"""
+    unstructured_query: Optional[str] = None
+    structured_query: Optional[str] = None
+    needs_db_query: bool = False
+    decomposition_reasoning: str = ""
+
+
+class RelevanceAnalysis(BaseModel):
+    """연관성 분석 결과"""
+    reasoning: str
+    confidence: float
+    matched_sections: List[str] = []
+
+
 class ChatResponse(BaseModel):
     """채팅 응답 모델"""
     answer: str
@@ -17,6 +32,9 @@ class ChatResponse(BaseModel):
     sources: Optional[List[Dict[str, Any]]] = None
     sql: Optional[str] = None
     results: Optional[List[Dict[str, Any]]] = None
+    # Multi-stage RAG 추가 필드
+    decomposition: Optional[QueryDecomposition] = None
+    relevance_analysis: Optional[RelevanceAnalysis] = None
 
 
 class UploadResponse(BaseModel):
